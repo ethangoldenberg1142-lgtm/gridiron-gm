@@ -9,7 +9,7 @@
   const CURRENT_YEAR = 2026;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
-  const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v1";
+  const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v2";
 
   const ALL_ATTRS = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
   const POSITIONS = ["QB", "RB", "WR", "TE", "T", "OG", "C", "DE", "DT", "LB", "CB", "S", "K", "P"];
@@ -74,6 +74,74 @@
     S: { h: [72, 1.9, 68, 77], w: [207, 12, 185, 230] },
     K: { h: [72, 2.2, 67, 77], w: [202, 16, 175, 230] },
     P: { h: [73, 2.3, 68, 78], w: [210, 17, 185, 240] }
+  };
+  const REAL_PLAYER_COMPS = {
+    QB: {
+      elite: ["Patrick Mahomes", "Josh Allen", "Joe Burrow", "Justin Herbert", "C.J. Stroud"],
+      mobile: ["Lamar Jackson", "Jalen Hurts", "Kyler Murray", "Michael Vick", "Anthony Richardson"],
+      pocket: ["Tom Brady", "Peyton Manning", "Drew Brees", "Kirk Cousins", "Jared Goff"],
+      power: ["Josh Allen", "Cam Newton", "Ben Roethlisberger", "Anthony Richardson", "Daunte Culpepper"],
+      developmental: ["Jordan Love", "Will Levis", "Trey Lance", "Baker Mayfield", "Geno Smith"]
+    },
+    RB: {
+      elite: ["LaDainian Tomlinson", "Adrian Peterson", "Christian McCaffrey", "Saquon Barkley", "Bijan Robinson"],
+      speed: ["Chris Johnson", "Jamaal Charles", "Jahmyr Gibbs", "Reggie Bush", "De'Von Achane"],
+      power: ["Derrick Henry", "Marshawn Lynch", "Nick Chubb", "Jonathan Taylor", "Earl Campbell"],
+      balanced: ["Alvin Kamara", "Breece Hall", "Josh Jacobs", "Matt Forte", "Arian Foster"]
+    },
+    WR: {
+      elite: ["Calvin Johnson", "Justin Jefferson", "Ja'Marr Chase", "Julio Jones", "Larry Fitzgerald"],
+      speed: ["Tyreek Hill", "DeSean Jackson", "Jaylen Waddle", "DJ Moore", "Terry McLaurin"],
+      size: ["Mike Evans", "A.J. Green", "Brandon Marshall", "Drake London", "DK Metcalf"],
+      route: ["Davante Adams", "Stefon Diggs", "Keenan Allen", "Cooper Kupp", "Amon-Ra St. Brown"]
+    },
+    TE: {
+      elite: ["Travis Kelce", "Rob Gronkowski", "Tony Gonzalez", "George Kittle", "Antonio Gates"],
+      receiving: ["Jimmy Graham", "Darren Waller", "Evan Engram", "Dallas Goedert", "Sam LaPorta"],
+      blocking: ["George Kittle", "Mark Andrews", "Jason Witten", "Heath Miller", "T.J. Hockenson"]
+    },
+    T: {
+      elite: ["Trent Williams", "Jonathan Ogden", "Joe Thomas", "Tyron Smith", "Penei Sewell"],
+      pass: ["Andrew Whitworth", "David Bakhtiari", "Lane Johnson", "Laremy Tunsil", "Ryan Ramczyk"],
+      power: ["Trent Williams", "Orlando Pace", "Willie Roaf", "Jordan Mailata", "Dawand Jones"]
+    },
+    OG: {
+      elite: ["Quenton Nelson", "Zack Martin", "Steve Hutchinson", "Alan Faneca", "Marshal Yanda"],
+      power: ["Quenton Nelson", "Larry Allen", "Brandon Scherff", "Joel Bitonio", "Mike Iupati"],
+      balanced: ["Zack Martin", "Joe Thuney", "Chris Lindstrom", "Wyatt Teller", "Kevin Zeitler"]
+    },
+    C: {
+      elite: ["Jason Kelce", "Creed Humphrey", "Travis Frederick", "Maurkice Pouncey", "Nick Mangold"],
+      power: ["Ryan Kelly", "Ryan Jensen", "Corey Linsley", "Alex Mack", "Frank Ragnow"],
+      balanced: ["Jason Kelce", "Creed Humphrey", "Frank Ragnow", "Tyler Linderbaum", "Erik McCoy"]
+    },
+    DE: {
+      elite: ["Myles Garrett", "T.J. Watt", "Micah Parsons", "Nick Bosa", "Von Miller"],
+      speed: ["Micah Parsons", "Von Miller", "Brian Burns", "Danielle Hunter", "Dwight Freeney"],
+      power: ["Myles Garrett", "Khalil Mack", "Julius Peppers", "Cameron Jordan", "Maxx Crosby"]
+    },
+    DT: {
+      elite: ["Aaron Donald", "Chris Jones", "Quinnen Williams", "Ndamukong Suh", "Cameron Heyward"],
+      rush: ["Aaron Donald", "Chris Jones", "Jalen Carter", "Geno Atkins", "DeForest Buckner"],
+      nose: ["Vince Wilfork", "Dexter Lawrence", "Vita Vea", "Haloti Ngata", "D.J. Reader"]
+    },
+    LB: {
+      elite: ["Ray Lewis", "Luke Kuechly", "Fred Warner", "Patrick Willis", "Roquan Smith"],
+      coverage: ["Fred Warner", "Lavonte David", "Shaquille Leonard", "Demario Davis", "Bobby Wagner"],
+      downhill: ["Ray Lewis", "Patrick Willis", "Brian Urlacher", "Jeremiah Owusu-Koramoah", "Zach Thomas"]
+    },
+    CB: {
+      elite: ["Darrelle Revis", "Sauce Gardner", "Patrick Surtain II", "Jalen Ramsey", "Champ Bailey"],
+      press: ["Richard Sherman", "Jalen Ramsey", "Aqib Talib", "Marshon Lattimore", "Stephon Gilmore"],
+      speed: ["Deion Sanders", "Denzel Ward", "Tariq Woolen", "Dominique Rodgers-Cromartie", "Trent McDuffie"]
+    },
+    S: {
+      elite: ["Ed Reed", "Troy Polamalu", "Derwin James", "Earl Thomas", "Minkah Fitzpatrick"],
+      coverage: ["Ed Reed", "Earl Thomas", "Kevin Byard", "Jessie Bates III", "Antoine Winfield Jr."],
+      box: ["Troy Polamalu", "Derwin James", "Kam Chancellor", "Brian Dawkins", "Budda Baker"]
+    },
+    K: { balanced: ["Justin Tucker", "Harrison Butker", "Adam Vinatieri", "Evan McPherson", "Brandon Aubrey"] },
+    P: { balanced: ["Johnny Hekker", "Michael Dickson", "Thomas Morstead", "A.J. Cole", "Bryan Anger"] }
   };
   const DEFAULT_ATTR_PROFILE = {
     spd: [-8, 8, 35, 92], str: [-8, 10, 30, 94], agi: [-8, 8, 35, 92], acc: [-7, 8, 35, 92],
@@ -1078,10 +1146,58 @@
   }
 
   function makePlayerComp(prospect) {
-    const comps = state.players.filter(player => player.pos === prospect.pos).sort((a, b) => Math.abs(a.ovr - prospect.trueOvr) - Math.abs(b.ovr - prospect.trueOvr));
-    const veteran = comps.length ? pick(comps.slice(0, Math.min(30, comps.length))) : null;
-    const styles = ["bigger", "raw", "polished", "faster", "higher-variance", "safer", "more physical"];
-    return veteran ? `${pick(styles)} ${playerName(veteran)}` : `${pick(styles)} starter profile`;
+    const pools = REAL_PLAYER_COMPS[prospect.pos] || { balanced: ["Kirk Cousins", "Bobby Wagner", "Jason Kelce"] };
+    const grade = prospect.trueOvr * 0.45 + prospect.truePot * 0.55;
+    const r = prospect.ratings || {};
+    let bucket = "balanced";
+    if (prospect.pos === "QB") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.spd || 0) >= 78 || (r.acc || 0) >= 80) bucket = "mobile";
+      else if ((r.thp || 0) >= 86 && prospect.weight >= 225) bucket = "power";
+      else if ((r.tha || 0) >= 76 || (r.awr || 0) >= 76) bucket = "pocket";
+      else bucket = "developmental";
+    } else if (prospect.pos === "RB") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.spd || 0) >= 92 || (r.acc || 0) >= 92) bucket = "speed";
+      else if ((r.trk || 0) >= 82 || prospect.weight >= 224) bucket = "power";
+      else bucket = "balanced";
+    } else if (prospect.pos === "WR") {
+      if (grade >= 90) bucket = "elite";
+      else if (prospect.height >= 75 || prospect.weight >= 218) bucket = "size";
+      else if ((r.spd || 0) >= 92 || (r.acc || 0) >= 92) bucket = "speed";
+      else bucket = "route";
+    } else if (prospect.pos === "TE") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.cth || 0) + (r.rr || 0) > (r.rbk || 0) + (r.str || 0)) bucket = "receiving";
+      else bucket = "blocking";
+    } else if (["T", "OG", "C"].includes(prospect.pos)) {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.pbk || 0) > (r.rbk || 0) + 4) bucket = "pass";
+      else if ((r.str || 0) >= 86 || prospect.weight >= bodyProfile(prospect.pos).w[0] + 15) bucket = "power";
+      else bucket = "balanced";
+    } else if (prospect.pos === "DE") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.spd || 0) >= 84 || (r.fmv || 0) > (r.pmv || 0) + 5) bucket = "speed";
+      else bucket = "power";
+    } else if (prospect.pos === "DT") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.pmv || 0) + (r.fmv || 0) > (r.bshed || 0) + (r.str || 0)) bucket = "rush";
+      else bucket = "nose";
+    } else if (prospect.pos === "LB") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.zon || 0) >= (r.tak || 0)) bucket = "coverage";
+      else bucket = "downhill";
+    } else if (prospect.pos === "CB") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.spd || 0) >= 93 || prospect.height >= 74) bucket = "speed";
+      else bucket = "press";
+    } else if (prospect.pos === "S") {
+      if (grade >= 90) bucket = "elite";
+      else if ((r.zon || 0) + (r.man || 0) >= (r.tak || 0) + (r.str || 0)) bucket = "coverage";
+      else bucket = "box";
+    }
+    const pool = pools[bucket] || pools.balanced || Object.values(pools)[0];
+    return pick(pool);
   }
 
   function buildDepthChart(teamId) {
