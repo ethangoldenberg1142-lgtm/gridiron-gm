@@ -3096,12 +3096,22 @@
     else if (action === "deleteLeague") {
       if (confirmAction("Delete this league save? This cannot be undone.")) deleteLeague(target.dataset.league);
     } else if (action === "createLeague") {
-      createNewLeague(ui.newLeagueName.trim());
-      ui.screen = "game";
-      ui.tab = "dashboard";
-      ui.newLeagueName = "";
-      save();
-      render();
+      try {
+        const leagueName = ui.newLeagueName.trim();
+        ui.screen = "game";
+        ui.tab = "dashboard";
+        ui.profileOpen = false;
+        createNewLeague(leagueName);
+        ui.newLeagueName = "";
+        save();
+        render();
+      } catch (error) {
+        console.error(error);
+        state = null;
+        ui.screen = "hub";
+        ui.toast = "New league creation failed.";
+        render();
+      }
     } else if (action === "importLeagueFromHub") {
       if (!confirmAction("Import this save as a separate league?")) return;
       importLeagueFromText();

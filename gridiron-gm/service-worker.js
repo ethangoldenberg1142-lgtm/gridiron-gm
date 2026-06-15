@@ -1,4 +1,4 @@
-const CACHE_NAME = "gridiron-gm-v4";
+const CACHE_NAME = "gridiron-gm-v5";
 const APP_SHELL = [
   "./",
   "./index.html",
