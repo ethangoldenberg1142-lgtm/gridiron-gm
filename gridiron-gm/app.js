@@ -10,6 +10,7 @@
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
 
+  const ALL_ATTRS = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
   const POSITIONS = ["QB", "RB", "WR", "TE", "T", "OG", "C", "DE", "DT", "LB", "CB", "S", "K", "P"];
   const DEPTH_NEEDS = { QB: 2, RB: 3, WR: 5, TE: 2, T: 3, OG: 3, C: 2, DE: 3, DT: 3, LB: 4, CB: 4, S: 3, K: 1, P: 1 };
   const ROSTER_PLAN = { QB: 3, RB: 4, WR: 7, TE: 3, T: 4, OG: 4, C: 2, DE: 4, DT: 4, LB: 6, CB: 6, S: 4, K: 1, P: 1 };
@@ -41,6 +42,30 @@
     P: [-10]
   };
   const PREMIUM_POSITIONS = new Set(["QB", "WR", "T", "DE", "DT", "CB"]);
+  const DEFAULT_ATTR_PROFILE = {
+    spd: [-8, 8, 35, 92], str: [-8, 10, 30, 94], agi: [-8, 8, 35, 92], acc: [-7, 8, 35, 92],
+    awr: [-2, 7, 35, 96], inj: [2, 9, 45, 99], sta: [4, 7, 55, 99], tgh: [1, 8, 45, 99],
+    thp: [-30, 8, 20, 55], tha: [-30, 8, 20, 55], cth: [-12, 10, 25, 90], rr: [-14, 10, 25, 90],
+    car: [-12, 9, 25, 90], trk: [-14, 10, 25, 90], pbk: [-20, 9, 20, 70], rbk: [-20, 9, 20, 70],
+    bshed: [-18, 10, 20, 85], pmv: [-20, 10, 20, 85], fmv: [-20, 10, 20, 85], tak: [-14, 10, 20, 88],
+    man: [-18, 10, 20, 88], zon: [-16, 10, 20, 88], prs: [-20, 10, 20, 88], kpw: [-35, 8, 15, 55], kac: [-35, 8, 15, 55]
+  };
+  const POSITION_ATTR_PROFILES = {
+    QB: { spd: [-14, 9, 45, 90], str: [-15, 8, 35, 78], agi: [-10, 8, 45, 90], acc: [-9, 8, 45, 90], thp: [4, 5, 55, 99], tha: [3, 5, 50, 99], awr: [1, 6, 45, 99], car: [-8, 8, 30, 86], trk: [-14, 8, 25, 80] },
+    RB: { spd: [6, 5, 68, 99], agi: [5, 5, 65, 99], acc: [6, 5, 68, 99], str: [-6, 8, 45, 88], car: [4, 5, 55, 99], trk: [1, 7, 45, 96], cth: [-5, 7, 38, 88], rr: [-9, 7, 32, 82], pbk: [-28, 8, 15, 55], rbk: [-24, 8, 15, 58] },
+    WR: { spd: [7, 5, 70, 99], agi: [5, 5, 65, 99], acc: [6, 5, 68, 99], str: [-18, 7, 30, 78], cth: [3, 5, 50, 99], rr: [4, 5, 50, 99], car: [-9, 7, 30, 85], trk: [-16, 8, 25, 78], pbk: [-35, 7, 10, 45], rbk: [-22, 8, 20, 65] },
+    TE: { spd: [-4, 6, 55, 88], agi: [-7, 6, 48, 84], acc: [-5, 6, 52, 86], str: [2, 6, 55, 94], cth: [2, 5, 48, 98], rr: [-1, 6, 45, 94], rbk: [0, 6, 42, 94], pbk: [-8, 7, 30, 82], car: [-11, 7, 28, 78] },
+    T: { spd: [-22, 5, 38, 72], agi: [-24, 5, 35, 70], acc: [-20, 5, 38, 74], str: [7, 5, 58, 99], pbk: [3, 5, 50, 99], rbk: [1, 5, 48, 98], awr: [1, 6, 45, 98], cth: [-38, 6, 10, 45], car: [-38, 6, 10, 45], man: [-40, 7, 10, 45], zon: [-40, 7, 10, 45] },
+    OG: { spd: [-25, 5, 35, 68], agi: [-25, 5, 35, 68], acc: [-22, 5, 35, 70], str: [8, 5, 58, 99], pbk: [1, 5, 48, 98], rbk: [3, 5, 50, 99], awr: [0, 6, 42, 96], cth: [-40, 6, 10, 42], car: [-40, 6, 10, 42] },
+    C: { spd: [-26, 5, 35, 66], agi: [-24, 5, 35, 68], acc: [-23, 5, 35, 70], str: [5, 5, 55, 97], pbk: [2, 5, 48, 98], rbk: [2, 5, 48, 98], awr: [4, 5, 48, 99], cth: [-40, 6, 10, 42], car: [-40, 6, 10, 42] },
+    DE: { spd: [-5, 7, 50, 91], agi: [-7, 7, 45, 88], acc: [-4, 7, 50, 92], str: [4, 6, 55, 99], bshed: [2, 5, 48, 98], pmv: [2, 6, 45, 99], fmv: [1, 7, 42, 98], tak: [0, 6, 45, 98], man: [-30, 8, 15, 62], zon: [-22, 8, 20, 72], prs: [-28, 8, 15, 65] },
+    DT: { spd: [-18, 6, 38, 78], agi: [-18, 6, 35, 78], acc: [-15, 6, 40, 82], str: [8, 5, 60, 99], bshed: [4, 5, 50, 99], pmv: [3, 6, 48, 99], fmv: [-4, 7, 35, 90], tak: [1, 6, 45, 98], man: [-38, 7, 10, 48], zon: [-30, 8, 15, 60] },
+    LB: { spd: [-2, 7, 55, 92], agi: [-4, 7, 50, 90], acc: [-2, 7, 55, 93], str: [-1, 7, 48, 94], tak: [3, 5, 50, 99], bshed: [0, 6, 42, 96], zon: [0, 6, 42, 96], man: [-8, 7, 30, 84], pmv: [-8, 8, 30, 84], fmv: [-7, 8, 30, 86], prs: [-12, 8, 25, 80] },
+    CB: { spd: [6, 5, 70, 99], agi: [6, 5, 68, 99], acc: [6, 5, 70, 99], str: [-22, 7, 28, 75], man: [4, 5, 50, 99], zon: [2, 5, 48, 98], prs: [0, 6, 42, 96], tak: [-9, 7, 28, 85], cth: [-6, 7, 35, 88], bshed: [-28, 7, 15, 58] },
+    S: { spd: [2, 6, 62, 96], agi: [1, 6, 58, 96], acc: [2, 6, 62, 97], str: [-10, 7, 38, 84], zon: [3, 5, 48, 99], man: [-1, 6, 40, 94], tak: [2, 5, 48, 98], prs: [-7, 7, 30, 86], cth: [-7, 7, 35, 86], bshed: [-16, 7, 22, 78] },
+    K: { spd: [-30, 5, 30, 58], str: [-28, 6, 25, 62], agi: [-30, 6, 25, 58], acc: [-28, 6, 25, 60], kpw: [5, 5, 55, 99], kac: [5, 5, 55, 99], awr: [0, 6, 40, 96], tak: [-45, 5, 5, 35] },
+    P: { spd: [-30, 5, 30, 58], str: [-28, 6, 25, 62], agi: [-30, 6, 25, 58], acc: [-28, 6, 25, 60], kpw: [6, 5, 55, 99], kac: [2, 5, 50, 98], awr: [0, 6, 40, 96], tak: [-45, 5, 5, 35] }
+  };
 
   const TEAM_DEFS = [
     ["ARI", "Arizona", "Cardinals", "NFC", "West", "#97233f", false, "hot", 0.82],
@@ -673,23 +698,61 @@
     }[pos] || ["awr"];
   }
 
+  function attrProfile(pos, attr) {
+    return (POSITION_ATTR_PROFILES[pos] && POSITION_ATTR_PROFILES[pos][attr]) || DEFAULT_ATTR_PROFILE[attr] || [-10, 8, 20, 90];
+  }
+
+  function attrBounds(pos, attr) {
+    const profile = attrProfile(pos, attr);
+    return { min: profile[2], max: profile[3] };
+  }
+
+  function generatedAttr(pos, attr, ovr) {
+    const [offset, sd, min, max] = attrProfile(pos, attr);
+    return Math.round(clamp(gaussian(ovr + offset, sd), min, max));
+  }
+
   function makeRatingsForPosition(pos, ovr, pot) {
     const base = {};
-    const attrNames = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
-    for (const attr of attrNames) base[attr] = Math.round(clamp(gaussian(ovr - 6, 9), 30, 99));
-    base.inj = Math.round(clamp(gaussian(78, 10), 45, 99));
-    base.sta = Math.round(clamp(gaussian(82, 7), 55, 99));
-    base.tgh = Math.round(clamp(gaussian(78, 9), 45, 99));
-    const tune = (attrs, bump = 2) => attrs.forEach(attr => { base[attr] = Math.round(clamp(gaussian(ovr + bump, 5.5), 30, 99)); });
-    tune(primaryAttrsForPosition(pos), PREMIUM_POSITIONS.has(pos) ? 2.5 : 1.5);
-    const current = computeOverall(pos, base);
-    const diff = ovr - current;
-    for (const attr of primaryAttrsForPosition(pos)) {
-      base[attr] = Math.round(clamp(base[attr] + diff, 30, 99));
+    for (const attr of ALL_ATTRS) base[attr] = generatedAttr(pos, attr, ovr);
+    const primaries = primaryAttrsForPosition(pos);
+    for (let i = 0; i < 5; i += 1) {
+      const current = computeOverall(pos, base);
+      const diff = ovr - current;
+      if (Math.abs(diff) <= 1) break;
+      const perAttr = diff / primaries.length;
+      for (const attr of primaries) {
+        const { min, max } = attrBounds(pos, attr);
+        base[attr] = Math.round(clamp(base[attr] + perAttr, min, max));
+      }
     }
     base.ovr = computeOverall(pos, base);
     base.pot = pot;
     return base;
+  }
+
+  function normalizeRatingsForPosition(pos, ratings, targetOvr = null) {
+    if (!ratings) return makeRatingsForPosition(pos, targetOvr || 60, targetOvr || 60);
+    for (const attr of ALL_ATTRS) {
+      if (typeof ratings[attr] !== "number") ratings[attr] = generatedAttr(pos, attr, targetOvr || ratings.ovr || 60);
+      const { min, max } = attrBounds(pos, attr);
+      ratings[attr] = Math.round(clamp(ratings[attr], min, max));
+    }
+    if (targetOvr !== null) {
+      const primaries = primaryAttrsForPosition(pos);
+      for (let i = 0; i < 5; i += 1) {
+        const current = computeOverall(pos, ratings);
+        const diff = targetOvr - current;
+        if (Math.abs(diff) <= 1) break;
+        const perAttr = diff / primaries.length;
+        for (const attr of primaries) {
+          const { min, max } = attrBounds(pos, attr);
+          ratings[attr] = Math.round(clamp(ratings[attr] + perAttr, min, max));
+        }
+      }
+    }
+    ratings.ovr = computeOverall(pos, ratings);
+    return ratings;
   }
 
   function computeOverall(pos, r) {
@@ -1154,6 +1217,10 @@
       for (const year of Object.keys(team.deadCap)) team.deadCap[year] = Number(team.deadCap[year]) || 0;
     }
     for (const player of state.players.concat(state.freeAgents)) {
+      player.ratings = normalizeRatingsForPosition(player.pos, player.ratings, player.ovr || player.ratings?.ovr || 60);
+      player.ovr = player.ratings.ovr;
+      player.pot = Math.max(player.pot || player.ovr, player.ovr);
+      player.truePot = Math.max(player.truePot || player.pot, player.ovr);
       player.injury ||= { status: "Healthy", weeks: 0, history: [], prone: 0.08 };
       player.injury.history ||= [];
       player.awards ||= [];
@@ -1164,6 +1231,19 @@
       if (player.contract) {
         player.contract.bonusYears ||= Math.min(player.contract.years, 5);
         player.contract.guaranteed ||= player.contract.salaries.map((salary, i) => i === 0 ? salary * 0.25 : 0);
+      }
+    }
+    for (const player of state.retiredPlayers || []) {
+      player.ratings = normalizeRatingsForPosition(player.pos, player.ratings, player.ovr || player.ratings?.ovr || 60);
+      player.ovr = player.ratings.ovr;
+      player.pot = Math.max(player.pot || player.ovr, player.ovr);
+    }
+    for (const draftClass of Object.values(state.draftClasses || {})) {
+      for (const prospect of draftClass) {
+        prospect.ratings = normalizeRatingsForPosition(prospect.pos, prospect.ratings, prospect.trueOvr || prospect.ratings?.ovr || 58);
+        prospect.trueOvr = prospect.ratings.ovr;
+        prospect.truePot = Math.max(prospect.truePot || prospect.trueOvr, prospect.trueOvr);
+        prospect.pot = prospect.truePot;
       }
     }
   }
@@ -1464,7 +1544,63 @@
     return available.concat(extras).slice(0, count);
   }
 
-  function unitRating(team, pos, count) {
+  function weightedAttrs(r, weights) {
+    let total = 0;
+    let weightTotal = 0;
+    for (const [attr, weight] of Object.entries(weights)) {
+      total += (r[attr] || 35) * weight;
+      weightTotal += weight;
+    }
+    return total / weightTotal;
+  }
+
+  function weightedChoice(items, weightFor) {
+    const weighted = items.map(item => ({ item, weight: Math.max(0, weightFor(item)) })).filter(entry => entry.weight > 0);
+    if (!weighted.length) return items[0] || null;
+    const total = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+    let roll = rand(0, total);
+    for (const entry of weighted) {
+      roll -= entry.weight;
+      if (roll <= 0) return entry.item;
+    }
+    return weighted[weighted.length - 1].item;
+  }
+
+  function defaultRoleForPos(pos) {
+    if (pos === "QB") return "qbPass";
+    if (pos === "RB") return "runner";
+    if (["WR", "TE"].includes(pos)) return "receiver";
+    if (["T", "OG", "C"].includes(pos)) return "passBlock";
+    if (["DE", "DT"].includes(pos)) return "passRush";
+    if (pos === "LB") return "runStop";
+    if (["CB", "S"].includes(pos)) return "coverage";
+    if (pos === "K") return "kick";
+    if (pos === "P") return "punt";
+    return "overall";
+  }
+
+  function playerSkill(player, role = "overall") {
+    if (!player) return 35;
+    const r = player.ratings;
+    const weights = {
+      overall: null,
+      qbPass: { tha: 0.36, thp: 0.2, awr: 0.22, acc: 0.06, agi: 0.04, sta: 0.06, tgh: 0.06 },
+      qbMobility: { spd: 0.22, acc: 0.22, agi: 0.2, car: 0.14, awr: 0.12, tgh: 0.1 },
+      runner: { car: 0.21, spd: 0.17, agi: 0.16, acc: 0.14, trk: 0.14, awr: 0.09, sta: 0.05, tgh: 0.04 },
+      receiver: { cth: 0.25, rr: 0.25, spd: 0.15, acc: 0.12, agi: 0.1, awr: 0.08, sta: 0.05 },
+      passBlock: { pbk: 0.39, awr: 0.2, str: 0.18, agi: 0.08, tgh: 0.08, sta: 0.07 },
+      runBlock: { rbk: 0.39, str: 0.22, awr: 0.16, tgh: 0.08, agi: 0.08, sta: 0.07 },
+      passRush: { fmv: 0.22, pmv: 0.2, bshed: 0.17, acc: 0.11, spd: 0.08, str: 0.08, tak: 0.08, awr: 0.06 },
+      runStop: { tak: 0.24, bshed: 0.22, str: 0.17, awr: 0.14, tgh: 0.08, acc: 0.07, spd: 0.05, agi: 0.03 },
+      coverage: { man: 0.21, zon: 0.2, spd: 0.16, acc: 0.12, agi: 0.11, awr: 0.11, prs: 0.06, tak: 0.03 },
+      tackling: { tak: 0.42, awr: 0.18, str: 0.14, spd: 0.1, acc: 0.08, tgh: 0.08 },
+      kick: { kac: 0.45, kpw: 0.43, awr: 0.12 },
+      punt: { kpw: 0.48, kac: 0.34, awr: 0.18 }
+    }[role];
+    return round(clamp(weights ? weightedAttrs(r, weights) : computeOverall(player.pos, r), 20, 99), 1);
+  }
+
+  function unitRating(team, pos, count, role = null) {
     const group = starters(team, pos, count);
     if (!group.length) return 35;
     const weights = [1, 0.82, 0.7, 0.58, 0.48, 0.38, 0.3];
@@ -1472,7 +1608,7 @@
     let total = 0;
     group.forEach((player, index) => {
       const weight = weights[index] || 0.25;
-      total += player.ovr * weight;
+      total += playerSkill(player, role || defaultRoleForPos(pos)) * weight;
       totalWeight += weight;
     });
     return total / totalWeight;
@@ -1483,87 +1619,118 @@
     const rb = starters(team, "RB", 2);
     const wr = starters(team, "WR", 3);
     const te = starters(team, "TE", 1)[0];
-    const t = unitRating(team, "T", 2);
-    const og = unitRating(team, "OG", 2);
-    const c = unitRating(team, "C", 1);
-    const ol = t * 0.44 + og * 0.36 + c * 0.2;
-    const de = unitRating(team, "DE", 2);
-    const dt = unitRating(team, "DT", 2);
-    const lb = unitRating(team, "LB", 3);
-    const cb = unitRating(team, "CB", 3);
-    const s = unitRating(team, "S", 2);
-    const offense = (qb?.ovr || 45) * 0.31 + unitRating(team, "WR", 3) * 0.17 + unitRating(team, "RB", 2) * 0.1 + (te?.ovr || 55) * 0.06 + ol * 0.23 + team.facilities.coaching * 1.4;
-    const defense = de * 0.14 + dt * 0.12 + lb * 0.16 + cb * 0.19 + s * 0.11 + team.facilities.coaching * 1.2 + 18;
+    const passBlock = unitRating(team, "T", 2, "passBlock") * 0.46 + unitRating(team, "OG", 2, "passBlock") * 0.34 + unitRating(team, "C", 1, "passBlock") * 0.2;
+    const runBlock = unitRating(team, "T", 2, "runBlock") * 0.38 + unitRating(team, "OG", 2, "runBlock") * 0.42 + unitRating(team, "C", 1, "runBlock") * 0.2;
+    const ol = passBlock * 0.58 + runBlock * 0.42;
+    const qbPass = playerSkill(qb, "qbPass");
+    const rbRun = unitRating(team, "RB", 2, "runner");
+    const wrRoute = unitRating(team, "WR", 3, "receiver");
+    const teRecv = te ? playerSkill(te, "receiver") : 55;
+    const passRush = unitRating(team, "DE", 2, "passRush") * 0.62 + unitRating(team, "DT", 2, "passRush") * 0.38;
+    const runStop = unitRating(team, "DT", 2, "runStop") * 0.38 + unitRating(team, "LB", 3, "runStop") * 0.4 + unitRating(team, "DE", 2, "runStop") * 0.22;
+    const coverage = unitRating(team, "CB", 3, "coverage") * 0.48 + unitRating(team, "S", 2, "coverage") * 0.32 + unitRating(team, "LB", 3, "coverage") * 0.2;
+    const tackling = unitRating(team, "LB", 3, "tackling") * 0.42 + unitRating(team, "S", 2, "tackling") * 0.28 + unitRating(team, "CB", 3, "tackling") * 0.18 + unitRating(team, "DT", 2, "tackling") * 0.12;
+    const offense = qbPass * 0.31 + wrRoute * 0.17 + rbRun * 0.1 + teRecv * 0.06 + passBlock * 0.16 + runBlock * 0.07 + team.facilities.coaching * 1.4;
+    const defense = passRush * 0.19 + runStop * 0.19 + coverage * 0.25 + tackling * 0.12 + team.facilities.coaching * 1.2 + 18;
     const oppDefense = defensiveRating(opponent);
     const oppOffense = offensiveRating(opponent);
     const topWr = wr[0];
     const topCb = starters(opponent, "CB", 1)[0];
-    const wrCb = (topWr?.ovr || 55) - (topCb?.ovr || 55);
-    const edgeVsTackle = (unitRating(opponent, "DE", 2) + unitRating(opponent, "DT", 2) * 0.45) - ol;
-    const passEdge = ((qb?.ovr || 45) - 70) * 0.42 + wrCb * 0.18 - edgeVsTackle * 0.15 + (weather.pass - 1) * 35;
-    const rushEdge = unitRating(team, "RB", 2) * 0.33 + ol * 0.3 - (unitRating(opponent, "DT", 2) * 0.2 + unitRating(opponent, "LB", 3) * 0.24) + (weather.rush - 1) * 24;
+    const wrCb = playerSkill(topWr, "receiver") - playerSkill(topCb, "coverage");
+    const oppPassRush = unitRating(opponent, "DE", 2, "passRush") * 0.62 + unitRating(opponent, "DT", 2, "passRush") * 0.38;
+    const oppRunStop = unitRating(opponent, "DT", 2, "runStop") * 0.4 + unitRating(opponent, "LB", 3, "runStop") * 0.42 + unitRating(opponent, "DE", 2, "runStop") * 0.18;
+    const passEdge = (qbPass - 70) * 0.42 + wrCb * 0.2 + (passBlock - oppPassRush) * 0.18 + (wrRoute - defensiveCoverageRating(opponent)) * 0.11 + (weather.pass - 1) * 35;
+    const rushEdge = rbRun * 0.28 + runBlock * 0.34 - oppRunStop * 0.38 + (weather.rush - 1) * 24;
     const marginEdge = offense - oppDefense + (defense - oppOffense) * 0.72 + (home ? 2.2 : 0) + (team.facilities.coaching - opponent.facilities.coaching) * 0.55;
-    return { team, opponent, home, qb, rb, wr, te, ol, offense, defense, passEdge, rushEdge, marginEdge };
+    return { team, opponent, home, weather, qb, rb, wr, te, ol, passBlock, runBlock, passRush, runStop, coverage, tackling, qbPass, rbRun, wrRoute, teRecv, offense, defense, passEdge, rushEdge, marginEdge };
   }
 
   function offensiveRating(team) {
-    const qb = unitRating(team, "QB", 1);
-    const skill = unitRating(team, "WR", 3) * 0.46 + unitRating(team, "RB", 2) * 0.27 + unitRating(team, "TE", 1) * 0.12;
-    const ol = unitRating(team, "T", 2) * 0.44 + unitRating(team, "OG", 2) * 0.36 + unitRating(team, "C", 1) * 0.2;
-    return qb * 0.34 + skill * 0.24 + ol * 0.24 + team.facilities.coaching * 1.3;
+    const qb = unitRating(team, "QB", 1, "qbPass");
+    const skill = unitRating(team, "WR", 3, "receiver") * 0.46 + unitRating(team, "RB", 2, "runner") * 0.27 + unitRating(team, "TE", 1, "receiver") * 0.12;
+    const passBlock = unitRating(team, "T", 2, "passBlock") * 0.46 + unitRating(team, "OG", 2, "passBlock") * 0.34 + unitRating(team, "C", 1, "passBlock") * 0.2;
+    const runBlock = unitRating(team, "T", 2, "runBlock") * 0.38 + unitRating(team, "OG", 2, "runBlock") * 0.42 + unitRating(team, "C", 1, "runBlock") * 0.2;
+    return qb * 0.34 + skill * 0.24 + passBlock * 0.14 + runBlock * 0.1 + team.facilities.coaching * 1.3;
   }
 
   function defensiveRating(team) {
-    return unitRating(team, "DE", 2) * 0.15 + unitRating(team, "DT", 2) * 0.14 + unitRating(team, "LB", 3) * 0.19 + unitRating(team, "CB", 3) * 0.21 + unitRating(team, "S", 2) * 0.13 + team.facilities.coaching * 1.2 + 17;
+    return unitRating(team, "DE", 2, "passRush") * 0.15 + unitRating(team, "DT", 2, "runStop") * 0.14 + unitRating(team, "LB", 3, "runStop") * 0.16 + unitRating(team, "CB", 3, "coverage") * 0.21 + unitRating(team, "S", 2, "coverage") * 0.13 + unitRating(team, "LB", 3, "coverage") * 0.06 + team.facilities.coaching * 1.2 + 17;
+  }
+
+  function defensiveCoverageRating(team) {
+    return unitRating(team, "CB", 3, "coverage") * 0.52 + unitRating(team, "S", 2, "coverage") * 0.33 + unitRating(team, "LB", 3, "coverage") * 0.15;
   }
 
   function buildBoxScore(game, homeProfile, awayProfile) {
+    const homeBox = makeTeamBox(homeProfile, game.homeScore, game.awayScore);
+    const awayBox = makeTeamBox(awayProfile, game.awayScore, game.homeScore);
+    distributeDefense(homeBox.players, homeProfile.team, awayBox.sacksAllowed, awayBox.passAtt, awayBox.rushAtt, awayBox.interceptions);
+    distributeDefense(awayBox.players, awayProfile.team, homeBox.sacksAllowed, homeBox.passAtt, homeBox.rushAtt, homeBox.interceptions);
     return {
-      home: makeTeamBox(homeProfile, game.homeScore, game.awayScore),
-      away: makeTeamBox(awayProfile, game.awayScore, game.homeScore),
+      home: homeBox,
+      away: awayBox,
       summary: `${game.weather.label}, ${teamName(homeProfile.team)} ${game.homeScore}, ${teamName(awayProfile.team)} ${game.awayScore}`
     };
   }
 
   function makeTeamBox(profile, points, oppPoints) {
+    const qbPass = playerSkill(profile.qb, "qbPass");
+    const qbMobility = playerSkill(profile.qb, "qbMobility");
+    const qbAccuracy = profile.qb?.ratings.tha || qbPass;
+    const qbAwareness = profile.qb?.ratings.awr || qbPass;
+    const oppCoverage = defensiveCoverageRating(profile.opponent);
+    const oppPassRush = unitRating(profile.opponent, "DE", 2, "passRush") * 0.62 + unitRating(profile.opponent, "DT", 2, "passRush") * 0.38;
+    const pressure = oppPassRush - profile.passBlock;
     const passHeavy = clamp(0.56 + profile.passEdge * 0.006 + (points < oppPoints ? 0.06 : -0.03), 0.44, 0.68);
     const plays = Math.round(clamp(61 + gaussian(0, 5) + (points + oppPoints - 43) * 0.15, 48, 76));
     const passAtt = Math.round(plays * passHeavy);
     const rushAtt = Math.max(14, plays - passAtt - randInt(0, 3));
-    const compRate = clamp(0.61 + profile.passEdge * 0.003 + (profile.qb?.ratings.tha || 60) * 0.0012 - 0.08, 0.48, 0.76);
+    const compRate = clamp(0.55 + (qbAccuracy - 65) * 0.0022 + (qbAwareness - 65) * 0.0012 + profile.passEdge * 0.0022, 0.48, 0.76);
     const passCmp = Math.round(passAtt * compRate);
-    const ypa = clamp(6.5 + profile.passEdge * 0.045 + gaussian(0, 0.75), 4.1, 10.6);
+    const ypa = clamp(6.2 + profile.passEdge * 0.038 + (qbPass - 70) * 0.018 + (profile.wrRoute - oppCoverage) * 0.015 + gaussian(0, 0.7), 4.0, 10.8);
     const passYds = Math.round(passAtt * ypa);
-    const passTd = Math.max(0, Math.round(points / 13 + gaussian(0, 0.8) - (profile.rushEdge > 8 ? 0.4 : 0)));
-    const interceptions = Math.max(0, Math.round(rand(0, 1.1) + (62 - (profile.qb?.ovr || 55)) * 0.018 - profile.passEdge * 0.01));
-    const ypc = clamp(4.1 + profile.rushEdge * 0.025 + gaussian(0, 0.35), 2.7, 6.6);
+    const passTd = Math.max(0, Math.round(points / 13 + (qbPass - 70) * 0.018 + profile.passEdge * 0.018 + gaussian(0, 0.75) - (profile.rushEdge > 8 ? 0.35 : 0)));
+    const interceptions = Math.max(0, Math.round(rand(0, 1.05) + (68 - qbPass) * 0.017 + (oppCoverage - qbPass) * 0.012 + Math.max(0, pressure) * 0.01 + (profile.weather.turnover - 1) * 1.8));
+    const ypc = clamp(4.0 + profile.rushEdge * 0.023 + (profile.rbRun - 70) * 0.012 + gaussian(0, 0.34), 2.6, 6.7);
     const rushYds = Math.round(rushAtt * ypc);
-    const rushTd = Math.max(0, Math.round(points / 18 + gaussian(0, 0.65) - passTd * 0.15));
-    const sacksAllowed = Math.max(0, Math.round(rand(0, 2.8) + Math.max(0, -profile.passEdge) * 0.055));
+    const rushTd = Math.max(0, Math.round(points / 18 + (profile.rbRun - 70) * 0.013 + profile.rushEdge * 0.012 + gaussian(0, 0.62) - passTd * 0.15));
+    const sacksAllowed = Math.max(0, Math.round(rand(0, 1.9) + Math.max(0, pressure) * 0.07 + Math.max(0, 66 - qbAwareness) * 0.018 - Math.max(0, qbMobility - 70) * 0.018));
     const players = [];
-    if (profile.qb) players.push({ playerId: profile.qb.id, passAtt, passCmp, passYds, passTd, int: interceptions, rushAtt: randInt(1, 5), rushYds: randInt(-2, 38), rushTd: chance(0.08) ? 1 : 0, usage: 1 });
+    if (profile.qb) {
+      const qbRushAtt = Math.round(clamp(rand(1, 4) + (qbMobility - 65) * 0.07, 0, 9));
+      const qbRushYds = Math.round(qbRushAtt * clamp(3.2 + (qbMobility - 65) * 0.045 + gaussian(0, 1.2), -0.6, 8.8));
+      players.push({ playerId: profile.qb.id, passAtt, passCmp, passYds, passTd, int: interceptions, rushAtt: qbRushAtt, rushYds: qbRushYds, rushTd: chance(clamp((qbMobility - 55) * 0.006, 0.02, 0.18)) ? 1 : 0, usage: 1 });
+    }
     distributeRushing(players, profile.rb, rushAtt, rushYds, rushTd);
     distributeReceiving(players, profile.wr.concat(profile.te ? [profile.te] : []).filter(Boolean), passCmp, passYds, passTd);
-    distributeDefense(players, profile.team, sacksAllowed);
     const k = starters(profile.team, "K", 1)[0];
     if (k) {
       const fg = Math.max(0, Math.round((points - passTd * 7 - rushTd * 7) / 3 + rand(-0.5, 0.8)));
       players.push({ playerId: k.id, fg, fga: fg + (chance(0.18) ? 1 : 0), xp: Math.max(0, passTd + rushTd), usage: 0.2 });
     }
     const p = starters(profile.team, "P", 1)[0];
-    if (p) players.push({ playerId: p.id, punts: Math.max(1, Math.round(5 - points / 12 + rand(-1, 2))), pAvg: round(rand(42, 51), 1), usage: 0.1 });
+    if (p) players.push({ playerId: p.id, punts: Math.max(1, Math.round(5 - points / 12 + rand(-1, 2))), pAvg: round(39 + playerSkill(p, "punt") * 0.11 + gaussian(0, 1.7), 1), usage: 0.1 });
     return { points, passAtt, passCmp, passYds, passTd, interceptions, rushAtt, rushYds, rushTd, sacksAllowed, players };
   }
 
   function distributeRushing(players, backs, rushAtt, rushYds, rushTd) {
     if (!backs.length) return;
-    const shares = backs.map((player, i) => Math.max(0.08, (i === 0 ? 0.68 : 0.25) + gaussian(0, 0.04)));
+    const shares = backs.map((player, i) => Math.max(0.08, (i === 0 ? 0.66 : 0.24) * (0.75 + playerSkill(player, "runner") / 95) + gaussian(0, 0.04)));
     const total = shares.reduce((sum, value) => sum + value, 0);
+    const tdWeights = backs.map((player, i) => shares[i] * (0.8 + (player.ratings.trk || playerSkill(player, "runner")) / 115));
+    const tdTotal = tdWeights.reduce((sum, value) => sum + value, 0);
+    let remainingTd = rushTd;
     backs.forEach((player, i) => {
-      const att = Math.round(rushAtt * shares[i] / total);
-      const yds = Math.round(rushYds * shares[i] / total + gaussian(0, 6));
-      const td = i === 0 ? Math.max(0, Math.round(rushTd * 0.72)) : Math.max(0, rushTd - Math.round(rushTd * 0.72));
-      players.push({ playerId: player.id, rushAtt: att, rushYds: yds, rushTd: td, rec: randInt(0, 4), recYds: randInt(0, 35), usage: 1 });
+      const share = shares[i] / total;
+      const runner = playerSkill(player, "runner");
+      const receiver = playerSkill(player, "receiver");
+      const att = Math.round(rushAtt * share);
+      const yds = Math.round(rushYds * share * (1 + (runner - 70) * 0.003) + gaussian(0, 5));
+      const td = i === backs.length - 1 ? remainingTd : Math.min(remainingTd, Math.max(0, Math.round(rushTd * tdWeights[i] / Math.max(0.01, tdTotal))));
+      remainingTd -= td;
+      const rec = Math.max(0, Math.round(rand(0, 2.2) + (receiver - 60) * 0.025));
+      const recYds = Math.max(0, Math.round(rec * clamp(5.4 + (player.ratings.spd - 70) * 0.045 + gaussian(0, 1.4), 2.5, 11.5)));
+      players.push({ playerId: player.id, rushAtt: att, rushYds: yds, rushTd: td, rec, recYds, usage: 1 });
     });
   }
 
@@ -1571,32 +1738,63 @@
     if (!targets.length) return;
     const baseShares = targets.map((player, index) => {
       const posBoost = player.pos === "WR" ? 1 : 0.76;
-      return Math.max(0.06, posBoost * (targets.length - index + 1) + gaussian(0, 0.3));
+      const receiver = playerSkill(player, "receiver");
+      const explosive = ((player.ratings.spd || receiver) + (player.ratings.acc || receiver)) / 2;
+      return Math.max(0.06, posBoost * (targets.length - index + 1) * (0.68 + receiver / 100) + (explosive - 70) * 0.018 + gaussian(0, 0.26));
     });
     const total = baseShares.reduce((sum, value) => sum + value, 0);
     let remainingTd = tds;
     targets.forEach((player, index) => {
       const share = baseShares[index] / total;
+      const receiver = playerSkill(player, "receiver");
+      const yardsSkill = ((player.ratings.spd || receiver) * 0.28 + (player.ratings.rr || receiver) * 0.36 + (player.ratings.cth || receiver) * 0.22 + (player.ratings.acc || receiver) * 0.14);
       const rec = Math.max(0, Math.round(completions * share + gaussian(0, 1.1)));
-      const recYds = Math.max(0, Math.round(yards * share + gaussian(0, 18)));
-      const recTd = index === 0 ? Math.min(remainingTd, Math.max(0, Math.round(tds * 0.42 + rand(-0.3, 0.6)))) : (remainingTd > 0 && chance(share * 1.8) ? 1 : 0);
+      const recYds = Math.max(0, Math.round(yards * share * (1 + (yardsSkill - 70) * 0.0035) + gaussian(0, 15)));
+      const tdWeight = share * (0.75 + receiver / 115);
+      const recTd = index === 0 ? Math.min(remainingTd, Math.max(0, Math.round(tds * tdWeight + rand(-0.25, 0.55)))) : (remainingTd > 0 && chance(tdWeight * 1.65) ? 1 : 0);
       remainingTd -= recTd;
       players.push({ playerId: player.id, rec, recYds, recTd, usage: 0.88 });
     });
   }
 
-  function distributeDefense(players, team, opponentSacksAllowed) {
+  function distributeDefense(players, team, opponentSacksAllowed, opponentPassAtt = 34, opponentRushAtt = 25, opponentInterceptions = 0) {
     const defenders = ["DE", "DT", "LB", "CB", "S"].flatMap(pos => starters(team, pos, pos === "LB" || pos === "CB" ? 3 : 2));
+    const sacksById = {};
+    let halfSacks = Math.round(opponentSacksAllowed * 2);
+    const sackEligible = defenders.filter(defender => ["DE", "DT", "LB"].includes(defender.pos));
+    while (halfSacks > 0 && sackEligible.length) {
+      const defender = weightedChoice(sackEligible, player => {
+        const posWeight = player.pos === "DE" ? 1.22 : player.pos === "DT" ? 0.95 : 0.66;
+        return Math.max(1, playerSkill(player, "passRush") - 42) * posWeight;
+      });
+      const amount = halfSacks === 1 || chance(0.28) ? 0.5 : 1;
+      sacksById[defender.id] = round((sacksById[defender.id] || 0) + amount, 1);
+      halfSacks -= Math.round(amount * 2);
+    }
+    const interceptionsById = {};
+    for (let i = 0; i < opponentInterceptions; i += 1) {
+      const defender = weightedChoice(defenders.filter(item => ["CB", "S", "LB"].includes(item.pos)), player => {
+        const posWeight = player.pos === "CB" ? 1.18 : player.pos === "S" ? 0.92 : 0.55;
+        return Math.max(1, playerSkill(player, "coverage") - 45) * posWeight;
+      });
+      if (defender) interceptionsById[defender.id] = (interceptionsById[defender.id] || 0) + 1;
+    }
+    const playLoad = clamp((opponentPassAtt + opponentRushAtt) / 64, 0.78, 1.28);
     for (const defender of defenders) {
-      const sackChance = ["DE", "DT", "LB"].includes(defender.pos) ? 0.18 : 0.03;
-      const sacks = chance(sackChance) ? round(rand(0.5, 1.5), 1) : 0;
+      const tackleSkill = playerSkill(defender, "tackling");
+      const runSkill = playerSkill(defender, "runStop");
+      const passRush = playerSkill(defender, "passRush");
+      const baseTackles = { DE: 2.8, DT: 3.2, LB: 5.8, CB: 3.5, S: 4.4 }[defender.pos] || 3;
+      const tackles = Math.max(0, Math.round((baseTackles + (tackleSkill - 65) * 0.045 + (opponentRushAtt - 24) * 0.035) * playLoad + gaussian(0, 1.4)));
+      const tflChance = clamp(0.08 + (runSkill - 60) * 0.005 + (["DE", "DT", "LB"].includes(defender.pos) ? 0.08 : 0), 0.03, 0.42);
+      const sacks = sacksById[defender.id] || 0;
       players.push({
         playerId: defender.id,
-        tackles: randInt(defender.pos === "CB" ? 2 : 3, defender.pos === "LB" ? 11 : 8),
-        tfl: chance(0.22) ? randInt(1, 2) : 0,
+        tackles,
+        tfl: chance(tflChance) ? randInt(1, runSkill >= 82 ? 3 : 2) : 0,
         sacks,
-        defInt: ["CB", "S", "LB"].includes(defender.pos) && chance(0.09) ? 1 : 0,
-        ff: chance(0.04) ? 1 : 0,
+        defInt: interceptionsById[defender.id] || 0,
+        ff: chance(clamp(0.025 + (tackleSkill - 65) * 0.0025 + (passRush - 70) * 0.001, 0.01, 0.09)) ? 1 : 0,
         usage: 0.9
       });
     }
@@ -1691,7 +1889,10 @@
     const direction = amount >= 0 ? 1 : -1;
     const chancePerAttr = clamp(Math.abs(amount), 0.02, 1);
     for (const attr of attrsByPos) {
-      if (chance(chancePerAttr)) player.ratings[attr] = Math.round(clamp(player.ratings[attr] + direction, 30, 99));
+      if (chance(chancePerAttr)) {
+        const { min, max } = attrBounds(player.pos, attr);
+        player.ratings[attr] = Math.round(clamp(player.ratings[attr] + direction, min, max));
+      }
     }
     updateOverall(player);
   }
@@ -2752,36 +2953,41 @@
     const wr = offProfile.wr[0];
     const cb = starters(def, "CB", 1)[0];
     const rb = offProfile.rb[0];
-    const lbUnit = unitRating(def, "LB", 3);
-    const passRush = unitRating(def, "DE", 2) * 0.62 + unitRating(def, "DT", 2) * 0.38;
-    const safety = unitRating(def, "S", 2);
+    const qbPass = playerSkill(qb, "qbPass");
+    const wrSkill = playerSkill(wr, "receiver");
+    const cbSkill = playerSkill(cb, "coverage");
+    const rbSkill = playerSkill(rb, "runner");
+    const lbRunStop = unitRating(def, "LB", 3, "runStop");
+    const passRush = unitRating(def, "DE", 2, "passRush") * 0.62 + unitRating(def, "DT", 2, "passRush") * 0.38;
+    const runStop = unitRating(def, "DT", 2, "runStop") * 0.36 + lbRunStop * 0.42 + unitRating(def, "S", 2, "tackling") * 0.1 + unitRating(def, "DE", 2, "runStop") * 0.12;
+    const coverage = defensiveCoverageRating(def);
     return [
       {
         label: `${off.abbr} pass game`,
         offense: `${qb ? playerName(qb) : "QB room"} / ${wr ? playerName(wr) : "WR room"}`,
         defense: `${cb ? playerName(cb) : "CB room"} plus ${def.abbr} coverage`,
-        edge: (qb?.ovr || 45) * 0.42 + unitRating(off, "WR", 3) * 0.25 + offProfile.ol * 0.18 - defensiveRating(def) * 0.5,
+        edge: qbPass * 0.36 + unitRating(off, "WR", 3, "receiver") * 0.22 + offProfile.passBlock * 0.17 - coverage * 0.25 - passRush * 0.16,
         impact: "explosive plays, turnovers"
       },
       {
         label: `${off.abbr} WR-CB`,
-        offense: wr ? `${playerName(wr)} ${wr.ovr} OVR` : "WR room",
-        defense: cb ? `${playerName(cb)} ${cb.ovr} OVR` : "CB room",
-        edge: (wr?.ovr || 55) - (cb?.ovr || 55),
+        offense: wr ? `${playerName(wr)} ${round(wrSkill, 1)} REC` : "WR room",
+        defense: cb ? `${playerName(cb)} ${round(cbSkill, 1)} COV` : "CB room",
+        edge: wrSkill - cbSkill,
         impact: "target share, third downs"
       },
       {
         label: `${off.abbr} protection`,
-        offense: `OL ${round(offProfile.ol, 1)}`,
+        offense: `Pass block ${round(offProfile.passBlock, 1)}`,
         defense: `${def.abbr} rush ${round(passRush, 1)}`,
-        edge: offProfile.ol - passRush,
+        edge: offProfile.passBlock - passRush,
         impact: "sacks, QB efficiency"
       },
       {
         label: `${off.abbr} run game`,
         offense: `${rb ? playerName(rb) : "RB room"} / OL`,
         defense: `${def.abbr} front seven`,
-        edge: (rb?.ovr || 55) * 0.32 + offProfile.ol * 0.33 - (unitRating(def, "DT", 2) * 0.22 + lbUnit * 0.28 + safety * 0.08),
+        edge: rbSkill * 0.34 + offProfile.runBlock * 0.36 - runStop * 0.46,
         impact: "clock, red zone"
       }
     ];
@@ -3197,6 +3403,7 @@
         ui.profileOpen = false;
         createNewLeague(leagueName);
         ui.newLeagueName = "";
+        render();
         await save();
         render();
       } catch (error) {
@@ -3285,6 +3492,7 @@
       if (confirmAction("Start a separate clean league? Your current league will remain saved.")) {
         ui = { ...ui, tab: "dashboard", tradeMine: new Set(), tradeTheirs: new Set(), toast: "" };
         createNewLeague(ui.newLeagueName.trim());
+        render();
         await save();
         render();
       }
