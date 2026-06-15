@@ -95,9 +95,11 @@
   let ui = {
     tab: "dashboard",
     selectedPlayerId: null,
+    profileOpen: false,
     rosterPos: "ALL",
     playerSearch: "",
     playerSort: "ovr",
+    playerScope: "all",
     historyYear: "ALL",
     scheduleWeek: 1,
     selectedGameId: null,
@@ -153,6 +155,25 @@
     return mean + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
   }
 
+  function hashString(value) {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function seededUnit(seed) {
+    return (hashString(seed) % 1000000) / 1000000;
+  }
+
+  function seededGaussian(seed, mean = 0, sd = 1) {
+    const u = Math.max(0.000001, seededUnit(`${seed}:u`));
+    const v = Math.max(0.000001, seededUnit(`${seed}:v`));
+    return mean + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
   function id(prefix, nextKey) {
     state[nextKey] += 1;
     return `${prefix}${state[nextKey]}`;
@@ -193,6 +214,19 @@
 
   function teamPlayers(teamId) {
     return state.players.filter(player => player.teamId === teamId);
+  }
+
+  function allKnownPlayers() {
+    return state.players.concat(state.freeAgents, state.retiredPlayers || []);
+  }
+
+  function playerIsRetired(player) {
+    return !!player && (state.retiredPlayers || []).some(retired => retired.id === player.id);
+  }
+
+  function playerStatus(player) {
+    if (playerIsRetired(player)) return "Retired";
+    return getTeam(player.teamId)?.abbr || "FA";
   }
 
   function salaryCap(year = state.year) {
@@ -273,6 +307,7 @@
   }
 
   function contractSummary(player) {
+    if (playerIsRetired(player)) return "Retired";
     if (!player.contract) return "FA";
     const idx = currentYearIndex(player);
     if (idx < 0) return "Expired";
@@ -1925,6 +1960,7 @@
   }
 
   function playerTradeValue(player) {
+    if (playerIsRetired(player)) return 0;
     const agePeak = REGRESSION_AGES[player.pos] - 3;
     const ageFactor = clamp(1.2 - Math.max(0, player.age - agePeak) * 0.08 + Math.max(0, 24 - player.age) * 0.035, 0.28, 1.35);
     const ability = Math.max(0, player.ovr - 52) ** 2.05 * 0.48 * POSITION_VALUE[player.pos];
@@ -2115,7 +2151,7 @@
     const yearsAway = Math.max(0, prospect.year - (state.year + 1));
     const noise = (10 - team.facilities.scouting) * 1.05 + yearsAway * 3.5;
     const trueValue = field === "ovr" ? prospect.trueOvr : prospect.truePot;
-    return Math.round(clamp(trueValue + gaussian(0, noise), 30, 99));
+    return Math.round(clamp(trueValue + seededGaussian(`${prospect.id}:${field}:${team.facilities.scouting}:${state.year}`, 0, noise), 30, 99));
   }
 
   function render() {
@@ -2143,8 +2179,21 @@
           ${renderPhaseBanner()}
           ${renderTab()}
         </main>
+        ${renderPlayerModal()}
       </div>
     `;
+  }
+
+  function renderPlayerModal() {
+    if (!ui.profileOpen || !ui.selectedPlayerId) return "";
+    const player = getPlayer(ui.selectedPlayerId);
+    if (!player) return "";
+    return `<div class="modal-backdrop">
+      <section class="modal" data-modal="profile">
+        <div class="modal-header"><h3>${playerName(player)}</h3><span class="pill light">${playerStatus(player)}</span><button data-action="closeProfile">Close</button></div>
+        <div class="modal-body">${renderPlayerCard(player)}</div>
+      </section>
+    </div>`;
   }
 
   function renderPhaseBanner() {
@@ -2310,15 +2359,16 @@
 
   function renderPlayerCard(player) {
     const team = player.teamId ? getTeam(player.teamId) : null;
+    const currentCap = playerIsRetired(player) ? 0 : capHit(player);
     const attrs = ["spd", "str", "agi", "acc", "awr", "inj", "thp", "tha", "cth", "rr", "car", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
     return `
       <div class="stack">
-        <div class="split"><div><strong>${playerName(player)}</strong><div class="muted">${player.pos} - ${team ? team.abbr : "FA"} - ${player.college}</div></div><span class="pill light">${player.devTrait}</span></div>
+        <div class="split"><div><strong>${playerName(player)}</strong><div class="muted">${player.pos} - ${playerStatus(player)} - ${player.college}</div></div><span class="pill light">${player.devTrait}</span></div>
         <div class="metric-row">
           <div class="metric"><label>Overall</label><strong>${player.ovr}</strong><span>Potential ${player.pot}</span></div>
           <div class="metric"><label>Age</label><strong>${player.age}</strong><span>Regresses near ${player.regressionAge}</span></div>
           <div class="metric"><label>Trade Value</label><strong>${playerTradeValue(player)}</strong><span>contract adjusted</span></div>
-          <div class="metric"><label>Cap Hit</label><strong>${money(capHit(player))}</strong><span>${contractSummary(player)}</span></div>
+          <div class="metric"><label>Cap Hit</label><strong>${money(currentCap)}</strong><span>${contractSummary(player)}</span></div>
         </div>
         <div class="table-wrap"><table><thead><tr><th>Stat</th><th class="num">Season</th><th class="num">Career</th></tr></thead><tbody>${renderStatRows(player)}</tbody></table></div>
         <div class="table-wrap"><table><thead><tr><th>Attr</th>${attrs.slice(0, 11).map(attr => `<th class="num">${attr.toUpperCase()}</th>`).join("")}</tr></thead><tbody><tr><td>Ratings</td>${attrs.slice(0, 11).map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr><tr><td>Skills</td>${attrs.slice(11).map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr></tbody></table></div>
@@ -2354,16 +2404,30 @@
 
   function renderPlayers() {
     const query = ui.playerSearch.toLowerCase();
-    const all = state.players.concat(state.freeAgents).filter(player => !query || playerName(player).toLowerCase().includes(query) || player.pos.toLowerCase().includes(query) || (getTeam(player.teamId)?.abbr || "FA").toLowerCase().includes(query));
+    const pool = playerPoolForScope();
+    const all = pool.filter(player => !query || playerName(player).toLowerCase().includes(query) || player.pos.toLowerCase().includes(query) || playerStatus(player).toLowerCase().includes(query) || player.college.toLowerCase().includes(query));
     const sorted = sortPlayers(all, ui.playerSort).slice(0, 450);
     return `
       <div class="toolbar">
-        <h2>Players</h2>
+        <h2>All-Time Player Database</h2>
         <input data-control="playerSearch" placeholder="Search" value="${escapeAttr(ui.playerSearch)}">
+        <select data-control="playerScope">
+          <option value="all" ${ui.playerScope === "all" ? "selected" : ""}>All players</option>
+          <option value="active" ${ui.playerScope === "active" ? "selected" : ""}>Active rosters</option>
+          <option value="freeAgents" ${ui.playerScope === "freeAgents" ? "selected" : ""}>Free agents</option>
+          <option value="retired" ${ui.playerScope === "retired" ? "selected" : ""}>Retired</option>
+        </select>
         <select data-control="playerSort">${["ovr", "pot", "passYds", "passTd", "rushYds", "rushTd", "recYds", "recTd", "int", "defInt", "sacks", "tackles", "age", "value"].map(key => `<option value="${key}" ${ui.playerSort === key ? "selected" : ""}>${key}</option>`).join("")}</select>
       </div>
       <section class="panel"><div class="table-wrap">${renderPlayerSpreadsheet(sorted)}</div></section>
     `;
+  }
+
+  function playerPoolForScope() {
+    if (ui.playerScope === "active") return state.players.slice();
+    if (ui.playerScope === "freeAgents") return state.freeAgents.slice();
+    if (ui.playerScope === "retired") return (state.retiredPlayers || []).slice();
+    return allKnownPlayers();
   }
 
   function sortPlayers(players, key) {
@@ -2376,8 +2440,8 @@
   }
 
   function renderPlayerSpreadsheet(players) {
-    return `<table><thead><tr><th>Pos</th><th>Name</th><th>Team</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th>Contract</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">Rush Yds</th><th class="num">Rec Yds</th><th class="num">Sacks</th><th class="num">INT</th><th class="num">Value</th></tr></thead><tbody>
-      ${players.map(player => `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${getTeam(player.teamId)?.abbr || "FA"}</td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td></tr>`).join("")}
+    return `<table><thead><tr><th>Pos</th><th>Name</th><th>Status</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th>Contract</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">Rush Yds</th><th class="num">Rec Yds</th><th class="num">Sacks</th><th class="num">INT</th><th class="num">Value</th></tr></thead><tbody>
+      ${players.map(player => `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${playerStatus(player)}</td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td></tr>`).join("")}
     </tbody></table>`;
   }
 
@@ -2538,12 +2602,17 @@
     const draftClass = state.draftClasses[String(ui.draftYear)] || [];
     const pickInfo = currentPickInfo();
     const selected = getProspect(ui.selectedProspectId) || draftClass[0];
-    const prospects = draftClass.slice().sort((a, b) => ui.draftSort === "pos" ? a.pos.localeCompare(b.pos) || a.rank - b.rank : a.rank - b.rank).slice(0, 180);
+    const prospects = draftClass.slice().sort((a, b) => {
+      if (ui.draftSort === "pos") return a.pos.localeCompare(b.pos) || a.rank - b.rank;
+      if (ui.draftSort === "pot") return scoutedValue(b, "pot") - scoutedValue(a, "pot") || a.rank - b.rank;
+      if (ui.draftSort === "ovr") return scoutedValue(b, "ovr") - scoutedValue(a, "ovr") || a.rank - b.rank;
+      return a.rank - b.rank;
+    }).slice(0, 180);
     return `
       <div class="toolbar">
         <h2>Draft</h2>
         <select data-control="draftYear">${years.map(year => `<option value="${year}" ${Number(ui.draftYear) === year ? "selected" : ""}>${year}</option>`).join("")}</select>
-        <select data-control="draftSort"><option value="rank" ${ui.draftSort === "rank" ? "selected" : ""}>Rank</option><option value="pos" ${ui.draftSort === "pos" ? "selected" : ""}>Position</option></select>
+        <select data-control="draftSort"><option value="rank" ${ui.draftSort === "rank" ? "selected" : ""}>Rank</option><option value="pot" ${ui.draftSort === "pot" ? "selected" : ""}>Potential</option><option value="ovr" ${ui.draftSort === "ovr" ? "selected" : ""}>Current</option><option value="pos" ${ui.draftSort === "pos" ? "selected" : ""}>Position</option></select>
         ${state.phase === "draft" ? `<button data-action="simPick">Sim Pick</button><button data-action="simRound">Sim Round</button>` : ""}
       </div>
       ${state.phase === "draft" && pickInfo ? `<div class="phase-banner"><strong>Pick ${pickInfo.overall}</strong><span>${getTeam(pickInfo.ownerTeam).abbr} - Round ${pickInfo.round}, Pick ${pickInfo.pickInRound}</span></div>` : ""}
@@ -2591,7 +2660,7 @@
     const team = getTeam(USER_TEAM_ID);
     const yearsAway = Math.max(0, prospect.year - (state.year + 1));
     const noise = (10 - team.facilities.scouting) * 1.25 + yearsAway * 3.2;
-    return Math.round(clamp((prospect.ratings[attr] || 50) + gaussian(0, noise), 30, 99));
+    return Math.round(clamp((prospect.ratings[attr] || 50) + seededGaussian(`${prospect.id}:${attr}:${team.facilities.scouting}:${state.year}`, 0, noise), 30, 99));
   }
 
   function renderFreeAgency() {
@@ -2806,6 +2875,11 @@
   }
 
   app.addEventListener("click", event => {
+    if (event.target.classList?.contains("modal-backdrop")) {
+      ui.profileOpen = false;
+      render();
+      return;
+    }
     const tab = event.target.closest("[data-tab]");
     if (tab) {
       ui.tab = tab.dataset.tab;
@@ -2821,9 +2895,14 @@
     if (action === "advance") advance();
     else if (action === "selectPlayer") {
       ui.selectedPlayerId = target.dataset.player;
+      ui.profileOpen = true;
+      render();
+    } else if (action === "closeProfile") {
+      ui.profileOpen = false;
       render();
     } else if (action === "selectPlayerTab") {
       ui.selectedPlayerId = target.dataset.player;
+      ui.profileOpen = false;
       ui.tab = "roster";
       render();
     } else if (action === "release") releasePlayer(target.dataset.player);
@@ -2893,6 +2972,7 @@
     if (key === "rosterPos") ui.rosterPos = control.value;
     if (key === "playerSearch") ui.playerSearch = control.value;
     if (key === "playerSort") ui.playerSort = control.value;
+    if (key === "playerScope") ui.playerScope = control.value;
     if (key === "historyYear") ui.historyYear = control.value;
     if (key === "scheduleWeek") ui.scheduleWeek = Number(control.value);
     if (key === "draftYear") ui.draftYear = Number(control.value);
