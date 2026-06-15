@@ -1,7 +1,9 @@
 (() => {
   "use strict";
 
-  const SAVE_KEY = "detroit-wolverines-gm-save-v2";
+  const LEGACY_SAVE_KEY = "detroit-wolverines-gm-save-v2";
+  const LEAGUE_INDEX_KEY = "gridiron-gm-league-index-v1";
+  const LEAGUE_SAVE_PREFIX = "gridiron-gm-league-";
   const CURRENT_YEAR = 2026;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
@@ -93,6 +95,7 @@
   const app = document.getElementById("app");
   let state = null;
   let ui = {
+    screen: "hub",
     tab: "dashboard",
     selectedPlayerId: null,
     profileOpen: false,
@@ -110,6 +113,7 @@
     tradeMine: new Set(),
     tradeTheirs: new Set(),
     toast: "",
+    newLeagueName: "",
     importText: ""
   };
 
@@ -177,6 +181,48 @@
   function id(prefix, nextKey) {
     state[nextKey] += 1;
     return `${prefix}${state[nextKey]}`;
+  }
+
+  function newLeagueId() {
+    return `lg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function leagueSaveKey(leagueId) {
+    return `${LEAGUE_SAVE_PREFIX}${leagueId}`;
+  }
+
+  function loadLeagueIndex() {
+    try {
+      return JSON.parse(localStorage.getItem(LEAGUE_INDEX_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLeagueIndex(index) {
+    localStorage.setItem(LEAGUE_INDEX_KEY, JSON.stringify(index));
+  }
+
+  function leagueMetaFromState() {
+    const team = state ? getTeam(USER_TEAM_ID) : null;
+    return {
+      id: state.leagueId,
+      name: state.leagueName || "Detroit Wolverines League",
+      year: state.year,
+      phase: phaseLabel(),
+      record: team ? `${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}` : "0-0",
+      updatedAt: Date.now()
+    };
+  }
+
+  function upsertLeagueIndex(meta) {
+    const index = loadLeagueIndex().filter(item => item.id !== meta.id);
+    index.unshift(meta);
+    saveLeagueIndex(index);
+  }
+
+  function confirmAction(message) {
+    return window.confirm(message);
   }
 
   function money(value) {
@@ -333,11 +379,13 @@
     }
   }
 
-  function createNewLeague() {
+  function createNewLeague(name = "") {
     state = {
       version: 1,
+      leagueId: newLeagueId(),
+      leagueName: name || `Detroit Rebuild ${new Date().toLocaleDateString()}`,
       year: CURRENT_YEAR,
-      phase: "preseason",
+      phase: "regular",
       week: 1,
       playoffRound: "",
       currentDraft: null,
@@ -369,7 +417,7 @@
     }
     state.schedule = buildSeasonSchedule();
     resetSeasonStats();
-    addNews("League created", "Detroit Wolverines ownership hired you to build a sustainable contender.");
+    addNews("League created", "Offseason training, free agency, and roster setup are complete. Week 1 is ready.");
     save();
   }
 
@@ -904,17 +952,47 @@
   }
 
   function save() {
+    if (!state) return;
+    state.updatedAt = Date.now();
     const packed = {
       state,
-      ui: { ...ui, tradeMine: Array.from(ui.tradeMine), tradeTheirs: Array.from(ui.tradeTheirs), toast: "" }
+      ui: { ...ui, screen: "game", tradeMine: Array.from(ui.tradeMine), tradeTheirs: Array.from(ui.tradeTheirs), toast: "", profileOpen: false }
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(packed));
+    localStorage.setItem(leagueSaveKey(state.leagueId), JSON.stringify(packed));
+    upsertLeagueIndex(leagueMetaFromState());
   }
 
   function load() {
-    const raw = localStorage.getItem(SAVE_KEY);
+    migrateLegacySave();
+    state = null;
+    ui.screen = "hub";
+  }
+
+  function migrateLegacySave() {
+    const index = loadLeagueIndex();
+    if (index.length || !localStorage.getItem(LEGACY_SAVE_KEY)) return;
+    try {
+      const packed = JSON.parse(localStorage.getItem(LEGACY_SAVE_KEY));
+      const migratedState = packed.state;
+      migratedState.leagueId ||= newLeagueId();
+      migratedState.leagueName ||= "Migrated Detroit League";
+      migratedState.updatedAt = Date.now();
+      const migratedUi = { ...ui, ...(packed.ui || {}), screen: "game", tradeMine: [], tradeTheirs: [], toast: "", profileOpen: false };
+      localStorage.setItem(leagueSaveKey(migratedState.leagueId), JSON.stringify({ state: migratedState, ui: migratedUi }));
+      state = migratedState;
+      migrateState();
+      upsertLeagueIndex(leagueMetaFromState());
+      state = null;
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function loadLeague(leagueId) {
+    const raw = localStorage.getItem(leagueSaveKey(leagueId));
     if (!raw) {
-      createNewLeague();
+      ui.toast = "League save was not found.";
+      render();
       return;
     }
     try {
@@ -922,19 +1000,58 @@
       state = packed.state;
       ui = {
         ...ui,
-        ...packed.ui,
+        ...(packed.ui || {}),
+        screen: "game",
         tradeMine: new Set(packed.ui?.tradeMine || []),
         tradeTheirs: new Set(packed.ui?.tradeTheirs || []),
-        toast: ""
+        toast: "",
+        profileOpen: false
       };
       migrateState();
+      save();
+      render();
     } catch (error) {
       console.error(error);
-      createNewLeague();
+      ui.toast = "League failed to load.";
+      render();
+    }
+  }
+
+  function deleteLeague(leagueId) {
+    const index = loadLeagueIndex().filter(item => item.id !== leagueId);
+    saveLeagueIndex(index);
+    localStorage.removeItem(leagueSaveKey(leagueId));
+    if (state?.leagueId === leagueId) state = null;
+    ui.screen = "hub";
+    render();
+  }
+
+  function importLeagueFromText() {
+    try {
+      const importedState = JSON.parse(ui.importText);
+      state = importedState.state ? importedState.state : importedState;
+      state.leagueId = newLeagueId();
+      state.leagueName = ui.newLeagueName.trim() || state.leagueName || "Imported Detroit League";
+      migrateState();
+      ui.screen = "game";
+      ui.tab = "dashboard";
+      ui.tradeMine = new Set();
+      ui.tradeTheirs = new Set();
+      ui.profileOpen = false;
+      save();
+      ui.toast = "Imported league.";
+      render();
+    } catch {
+      ui.toast = "Import failed.";
+      state = null;
+      ui.screen = "hub";
+      render();
     }
   }
 
   function migrateState() {
+    state.leagueId ||= newLeagueId();
+    state.leagueName ||= "Detroit Wolverines League";
     state.retiredPlayers ||= [];
     for (const team of state.teams) {
       team.retiredPending ||= [];
@@ -1118,7 +1235,7 @@
 
   function startNextSeason() {
     state.year += 1;
-    state.phase = "preseason";
+    state.phase = "regular";
     state.week = 1;
     state.playoffRound = "";
     state.currentDraft = null;
@@ -1128,7 +1245,7 @@
     state.schedule = state.schedule.filter(game => game.year < state.year - 1);
     state.schedule.push(...buildSeasonSchedule());
     for (const team of state.teams) buildDepthChart(team.id);
-    addNews("New league year", `${state.year} opened with a fresh schedule and three preseason weeks.`);
+    addNews("New league year", `${state.year} opened after offseason training. Week 1 is ready.`);
   }
 
   function tickInjuries() {
@@ -1755,6 +1872,7 @@
     const player = getPlayer(playerId);
     if (!player || player.teamId !== USER_TEAM_ID) return;
     const offer = extensionOffer(player);
+    if (!confirmAction(`Extend ${playerName(player)} for ${offer.years} years at about ${money(contractAav(offer))} per year?`)) return;
     const spaceBefore = capSpace(USER_TEAM_ID);
     const oldHit = capHit(player);
     const newHit = contractYearHit(offer, 0);
@@ -1773,6 +1891,7 @@
     const player = state.freeAgents.find(item => item.id === playerId);
     if (!player) return false;
     const team = getTeam(teamId);
+    if (teamId === USER_TEAM_ID && noisy && !confirmAction(`Sign ${playerName(player)} (${player.pos}, ${player.ovr} OVR) for an estimated ${money(estimatedAsk(player))} per year?`)) return false;
     if (teamPlayers(teamId).length >= MAX_ROSTER) {
       if (noisy) ui.toast = "Roster is already at 53 players.";
       return false;
@@ -1851,6 +1970,8 @@
       render();
       return;
     }
+    const prospect = getProspect(prospectId);
+    if (prospect && !confirmAction(`Draft ${playerName(prospect)}, ${prospect.pos}, ${prospect.college} at pick ${pickInfo.round}.${pickInfo.pickInRound}?`)) return;
     makeDraftSelection(pickInfo, prospectId);
     save();
     render();
@@ -2054,6 +2175,9 @@
       return;
     }
     const partnerId = ui.tradePartner;
+    const mine = Array.from(ui.tradeMine).map(assetLabel).join(", ") || "nothing";
+    const theirs = Array.from(ui.tradeTheirs).map(assetLabel).join(", ") || "nothing";
+    if (!confirmAction(`Offer this trade?\n\nDetroit sends: ${mine}\n\n${getTeam(partnerId).abbr} sends: ${theirs}\n\nDetroit cap after: ${money(preview.cap.userAfter)}`)) return;
     executeTrade(USER_TEAM_ID, partnerId, Array.from(ui.tradeMine), Array.from(ui.tradeTheirs));
     ui.tradeMine.clear();
     ui.tradeTheirs.clear();
@@ -2096,6 +2220,8 @@
     if (!player || player.teamId !== USER_TEAM_ID) return;
     const team = getTeam(USER_TEAM_ID);
     const dead = deadCapIfRelease(player);
+    const savings = capHit(player) - dead.current;
+    if (!confirmAction(`Release ${playerName(player)} (${player.pos}, ${player.ovr} OVR)?\n\nCurrent dead cap: ${money(dead.current)}\nCap savings: ${money(savings)}`)) return;
     team.deadCap[String(state.year)] = round((team.deadCap[String(state.year)] || 0) + dead.current, 2);
     if (dead.next > 0) team.deadCap[String(state.year + 1)] = round((team.deadCap[String(state.year + 1)] || 0) + dead.next, 2);
     player.teamId = null;
@@ -2117,6 +2243,7 @@
       render();
       return;
     }
+    if (!confirmAction(`Upgrade ${kind} to level ${team.facilities[kind] + 1} for ${money(cost)}?`)) return;
     team.cash = round(team.cash - cost, 1);
     team.facilities[kind] += 1;
     addNews("Facility upgrade", `${kind[0].toUpperCase() + kind.slice(1)} upgraded to level ${team.facilities[kind]}.`);
@@ -2155,6 +2282,10 @@
   }
 
   function render() {
+    if (!state || ui.screen === "hub") {
+      renderLeagueHub();
+      return;
+    }
     const team = getTeam(USER_TEAM_ID);
     app.innerHTML = `
       <div class="shell">
@@ -2180,6 +2311,40 @@
           ${renderTab()}
         </main>
         ${renderPlayerModal()}
+      </div>
+    `;
+  }
+
+  function renderLeagueHub() {
+    const leagues = loadLeagueIndex();
+    app.innerHTML = `
+      <div class="league-hub">
+        <header class="hub-header">
+          <h1>Detroit Wolverines GM</h1>
+          <div>Choose a league, import a save, or generate a new clean league.</div>
+        </header>
+        <main class="hub-main">
+          ${ui.toast ? `<div class="toast">${escapeHtml(ui.toast)}</div>` : ""}
+          <div class="grid two">
+            <section class="panel">
+              <div class="panel-header"><h3>Leagues</h3><span class="spacer muted">${leagues.length} saved</span></div>
+              ${leagues.length ? leagues.map(league => `<div class="league-row">
+                <div><strong>${escapeHtml(league.name)}</strong><span>${league.year} - ${escapeHtml(league.phase)} - Detroit ${escapeHtml(league.record)} - updated ${new Date(league.updatedAt).toLocaleString()}</span></div>
+                <button class="primary" data-action="loadLeague" data-league="${league.id}">Play</button>
+                <button class="danger" data-action="deleteLeague" data-league="${league.id}">Delete</button>
+              </div>`).join("") : `<div class="empty">No saved leagues yet.</div>`}
+            </section>
+            <section class="panel">
+              <div class="panel-header"><h3>Start Or Import</h3></div>
+              <div class="panel-body stack">
+                <input data-control="newLeagueName" placeholder="League name" value="${escapeAttr(ui.newLeagueName || "")}">
+                <button class="primary" data-action="createLeague">Start Clean League</button>
+                <textarea data-control="importText" placeholder="Paste exported save JSON">${escapeHtml(ui.importText)}</textarea>
+                <button data-action="importLeagueFromHub">Import Save As League</button>
+              </div>
+            </section>
+          </div>
+        </main>
       </div>
     `;
   }
@@ -2440,8 +2605,9 @@
   }
 
   function renderPlayerSpreadsheet(players) {
-    return `<table><thead><tr><th>Pos</th><th>Name</th><th>Status</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th>Contract</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">Rush Yds</th><th class="num">Rec Yds</th><th class="num">Sacks</th><th class="num">INT</th><th class="num">Value</th></tr></thead><tbody>
-      ${players.map(player => `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${playerStatus(player)}</td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td></tr>`).join("")}
+    const attrs = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
+    return `<table><thead><tr><th>Pos</th><th>Name</th><th>Status</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th>Contract</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">Rush Yds</th><th class="num">Rec Yds</th><th class="num">Sacks</th><th class="num">INT</th><th class="num">Value</th>${attrs.map(attr => `<th class="num">${attr.toUpperCase()}</th>`).join("")}</tr></thead><tbody>
+      ${players.map(player => `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${playerStatus(player)}</td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td>${attrs.map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr>`).join("")}
     </tbody></table>`;
   }
 
@@ -2838,6 +3004,7 @@
   function renderSettings() {
     return `<div class="grid two">
       <section class="panel"><div class="panel-header"><h3>Save</h3></div><div class="panel-body stack">
+        <button data-action="returnHub">League Dashboard</button>
         <button data-action="manualSave">Save Now</button>
         <button data-action="exportSave">Export Save</button>
         <textarea data-control="importText" placeholder="Save JSON">${escapeHtml(ui.importText)}</textarea>
@@ -2874,7 +3041,40 @@
     return escapeHtml(value).replace(/"/g, "&quot;");
   }
 
+  function sortDomTable(header) {
+    const table = header.closest("table");
+    const tbody = table?.querySelector("tbody");
+    if (!table || !tbody) return;
+    const headers = Array.from(header.parentElement.children);
+    const index = headers.indexOf(header);
+    const direction = header.dataset.sortDirection === "asc" ? "desc" : "asc";
+    headers.forEach(item => {
+      item.classList.remove("sorted-asc", "sorted-desc");
+      delete item.dataset.sortDirection;
+    });
+    header.dataset.sortDirection = direction;
+    header.classList.add(direction === "asc" ? "sorted-asc" : "sorted-desc");
+    const parse = value => {
+      const cleaned = value.replace(/[$,%]/g, "").replace(/M\b/i, "").trim();
+      const number = Number(cleaned);
+      return Number.isFinite(number) && cleaned !== "" ? number : value.toLowerCase();
+    };
+    const rows = Array.from(tbody.querySelectorAll("tr"));
+    rows.sort((a, b) => {
+      const av = parse(a.children[index]?.innerText || "");
+      const bv = parse(b.children[index]?.innerText || "");
+      if (typeof av === "number" && typeof bv === "number") return direction === "asc" ? av - bv : bv - av;
+      return direction === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+    rows.forEach(row => tbody.appendChild(row));
+  }
+
   app.addEventListener("click", event => {
+    const header = event.target.closest("th");
+    if (header) {
+      sortDomTable(header);
+      return;
+    }
     if (event.target.classList?.contains("modal-backdrop")) {
       ui.profileOpen = false;
       render();
@@ -2892,7 +3092,26 @@
     if (!target) return;
     const action = target.dataset.action;
     ui.toast = "";
-    if (action === "advance") advance();
+    if (action === "loadLeague") loadLeague(target.dataset.league);
+    else if (action === "deleteLeague") {
+      if (confirmAction("Delete this league save? This cannot be undone.")) deleteLeague(target.dataset.league);
+    } else if (action === "createLeague") {
+      createNewLeague(ui.newLeagueName.trim());
+      ui.screen = "game";
+      ui.tab = "dashboard";
+      ui.newLeagueName = "";
+      save();
+      render();
+    } else if (action === "importLeagueFromHub") {
+      if (!confirmAction("Import this save as a separate league?")) return;
+      importLeagueFromText();
+    } else if (action === "advance") advance();
+    else if (action === "returnHub") {
+      save();
+      state = null;
+      ui.screen = "hub";
+      render();
+    }
     else if (action === "selectPlayer") {
       ui.selectedPlayerId = target.dataset.player;
       ui.profileOpen = true;
@@ -2946,8 +3165,11 @@
       ui.importText = JSON.stringify(state);
       render();
     } else if (action === "importSave") {
+      if (!confirmAction("Replace the current league with this imported save?")) return;
       try {
         state = JSON.parse(ui.importText);
+        state.leagueId ||= newLeagueId();
+        state.leagueName ||= ui.newLeagueName || "Imported Detroit League";
         migrateState();
         save();
         ui.toast = "Imported.";
@@ -2956,10 +3178,9 @@
       }
       render();
     } else if (action === "newLeague") {
-      if (confirm("Start a new league and overwrite the current save?")) {
-        localStorage.removeItem(SAVE_KEY);
+      if (confirmAction("Start a separate clean league? Your current league will remain saved.")) {
         ui = { ...ui, tab: "dashboard", tradeMine: new Set(), tradeTheirs: new Set(), toast: "" };
-        createNewLeague();
+        createNewLeague(ui.newLeagueName.trim());
         render();
       }
     }
@@ -2981,6 +3202,7 @@
       ui.tradePartner = control.value;
       ui.tradeTheirs.clear();
     }
+    if (key === "newLeagueName") ui.newLeagueName = control.value;
     if (key === "importText") ui.importText = control.value;
     save();
     render();
@@ -2994,6 +3216,7 @@
       render();
     }
     if (control.dataset.control === "importText") ui.importText = control.value;
+    if (control.dataset.control === "newLeagueName") ui.newLeagueName = control.value;
   });
 
   load();

@@ -402,6 +402,21 @@ th {
   position: sticky;
   top: 0;
   z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sorted-asc,
+th.sorted-desc {
+  color: var(--accent);
+}
+
+th.sorted-asc::after {
+  content: " ^";
+}
+
+th.sorted-desc::after {
+  content: " v";
 }
 
 tr:hover td {
@@ -663,6 +678,59 @@ tr:hover td {
 
 .phase-banner button {
   margin-left: auto;
+}
+
+.league-hub {
+  min-height: 100vh;
+  background: var(--bg);
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.hub-header {
+  background: var(--nav);
+  color: #fff;
+  padding: 18px;
+  border-bottom: 4px solid #b91c1c;
+}
+
+.hub-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.hub-header div {
+  color: #cbd5e1;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.hub-main {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.league-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.league-row:last-child {
+  border-bottom: 0;
+}
+
+.league-row strong {
+  display: block;
+}
+
+.league-row span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 @media (max-width: 980px) {
