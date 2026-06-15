@@ -4,6 +4,8 @@
   const LEGACY_SAVE_KEY = "detroit-wolverines-gm-save-v2";
   const LEAGUE_INDEX_KEY = "gridiron-gm-league-index-v1";
   const LEAGUE_SAVE_PREFIX = "gridiron-gm-league-";
+  const DB_NAME = "gridiron-gm-db-v1";
+  const DB_STORE = "leagues";
   const CURRENT_YEAR = 2026;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
@@ -191,6 +193,86 @@
     return `${LEAGUE_SAVE_PREFIX}${leagueId}`;
   }
 
+  let dbPromise = null;
+
+  function openLeagueDb() {
+    if (!("indexedDB" in window)) return Promise.resolve(null);
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = event => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: "id" });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return dbPromise;
+  }
+
+  function pruneLocalLeaguePayloads() {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i += 1) keys.push(localStorage.key(i));
+    keys.filter(key => key && (key.startsWith(LEAGUE_SAVE_PREFIX) || key === LEGACY_SAVE_KEY)).forEach(key => localStorage.removeItem(key));
+  }
+
+  async function saveLeaguePayload(leagueId, packed) {
+    const db = await openLeagueDb();
+    if (!db) {
+      localStorage.setItem(leagueSaveKey(leagueId), JSON.stringify(packed));
+      return;
+    }
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readwrite");
+      tx.objectStore(DB_STORE).put({ id: leagueId, packed, updatedAt: Date.now() });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    localStorage.removeItem(leagueSaveKey(leagueId));
+  }
+
+  async function loadLeaguePayload(leagueId) {
+    const db = await openLeagueDb();
+    if (db) {
+      const record = await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, "readonly");
+        const request = tx.objectStore(DB_STORE).get(leagueId);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      if (record?.packed) return record.packed;
+    }
+    const raw = localStorage.getItem(leagueSaveKey(leagueId));
+    return raw ? JSON.parse(raw) : null;
+  }
+
+  async function deleteLeaguePayload(leagueId) {
+    const db = await openLeagueDb();
+    if (db) {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, "readwrite");
+        tx.objectStore(DB_STORE).delete(leagueId);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    localStorage.removeItem(leagueSaveKey(leagueId));
+  }
+
+  async function migrateLocalLeaguePayloads() {
+    for (const league of loadLeagueIndex()) {
+      const key = leagueSaveKey(league.id);
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        await saveLeaguePayload(league.id, JSON.parse(raw));
+        localStorage.removeItem(key);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  }
+
   function loadLeagueIndex() {
     try {
       return JSON.parse(localStorage.getItem(LEAGUE_INDEX_KEY) || "[]");
@@ -200,7 +282,12 @@
   }
 
   function saveLeagueIndex(index) {
-    localStorage.setItem(LEAGUE_INDEX_KEY, JSON.stringify(index));
+    try {
+      localStorage.setItem(LEAGUE_INDEX_KEY, JSON.stringify(index));
+    } catch {
+      pruneLocalLeaguePayloads();
+      localStorage.setItem(LEAGUE_INDEX_KEY, JSON.stringify(index));
+    }
   }
 
   function leagueMetaFromState() {
@@ -418,7 +505,6 @@
     state.schedule = buildSeasonSchedule();
     resetSeasonStats();
     addNews("League created", "Offseason training, free agency, and roster setup are complete. Week 1 is ready.");
-    save();
   }
 
   function makeTeam(teamDef, index) {
@@ -952,23 +1038,30 @@
   }
 
   function save() {
-    if (!state) return;
+    if (!state) return Promise.resolve();
     state.updatedAt = Date.now();
     const packed = {
       state,
       ui: { ...ui, screen: "game", tradeMine: Array.from(ui.tradeMine), tradeTheirs: Array.from(ui.tradeTheirs), toast: "", profileOpen: false }
     };
-    localStorage.setItem(leagueSaveKey(state.leagueId), JSON.stringify(packed));
-    upsertLeagueIndex(leagueMetaFromState());
+    const meta = leagueMetaFromState();
+    return saveLeaguePayload(state.leagueId, packed).then(() => {
+      upsertLeagueIndex(meta);
+    }).catch(error => {
+      console.error(error);
+      ui.toast = "Save failed. Browser storage may be blocked.";
+    });
   }
 
   function load() {
-    migrateLegacySave();
+    Promise.all([migrateLegacySave(), migrateLocalLeaguePayloads()]).then(() => {
+      if (!state && ui.screen === "hub") render();
+    });
     state = null;
     ui.screen = "hub";
   }
 
-  function migrateLegacySave() {
+  async function migrateLegacySave() {
     const index = loadLeagueIndex();
     if (index.length || !localStorage.getItem(LEGACY_SAVE_KEY)) return;
     try {
@@ -978,25 +1071,25 @@
       migratedState.leagueName ||= "Migrated Detroit League";
       migratedState.updatedAt = Date.now();
       const migratedUi = { ...ui, ...(packed.ui || {}), screen: "game", tradeMine: [], tradeTheirs: [], toast: "", profileOpen: false };
-      localStorage.setItem(leagueSaveKey(migratedState.leagueId), JSON.stringify({ state: migratedState, ui: migratedUi }));
       state = migratedState;
       migrateState();
+      await saveLeaguePayload(migratedState.leagueId, { state: migratedState, ui: migratedUi });
       upsertLeagueIndex(leagueMetaFromState());
+      localStorage.removeItem(LEGACY_SAVE_KEY);
       state = null;
     } catch (error) {
       console.error(error);
     }
   }
 
-  function loadLeague(leagueId) {
-    const raw = localStorage.getItem(leagueSaveKey(leagueId));
-    if (!raw) {
-      ui.toast = "League save was not found.";
-      render();
-      return;
-    }
+  async function loadLeague(leagueId) {
     try {
-      const packed = JSON.parse(raw);
+      const packed = await loadLeaguePayload(leagueId);
+      if (!packed) {
+        ui.toast = "League save was not found.";
+        render();
+        return;
+      }
       state = packed.state;
       ui = {
         ...ui,
@@ -1008,7 +1101,7 @@
         profileOpen: false
       };
       migrateState();
-      save();
+      await save();
       render();
     } catch (error) {
       console.error(error);
@@ -1017,16 +1110,16 @@
     }
   }
 
-  function deleteLeague(leagueId) {
+  async function deleteLeague(leagueId) {
     const index = loadLeagueIndex().filter(item => item.id !== leagueId);
     saveLeagueIndex(index);
-    localStorage.removeItem(leagueSaveKey(leagueId));
+    await deleteLeaguePayload(leagueId);
     if (state?.leagueId === leagueId) state = null;
     ui.screen = "hub";
     render();
   }
 
-  function importLeagueFromText() {
+  async function importLeagueFromText() {
     try {
       const importedState = JSON.parse(ui.importText);
       state = importedState.state ? importedState.state : importedState;
@@ -1038,7 +1131,7 @@
       ui.tradeMine = new Set();
       ui.tradeTheirs = new Set();
       ui.profileOpen = false;
-      save();
+      await save();
       ui.toast = "Imported league.";
       render();
     } catch {
@@ -3069,7 +3162,7 @@
     rows.forEach(row => tbody.appendChild(row));
   }
 
-  app.addEventListener("click", event => {
+  app.addEventListener("click", async event => {
     const header = event.target.closest("th");
     if (header) {
       sortDomTable(header);
@@ -3092,18 +3185,19 @@
     if (!target) return;
     const action = target.dataset.action;
     ui.toast = "";
-    if (action === "loadLeague") loadLeague(target.dataset.league);
+    if (action === "loadLeague") await loadLeague(target.dataset.league);
     else if (action === "deleteLeague") {
-      if (confirmAction("Delete this league save? This cannot be undone.")) deleteLeague(target.dataset.league);
+      if (confirmAction("Delete this league save? This cannot be undone.")) await deleteLeague(target.dataset.league);
     } else if (action === "createLeague") {
       try {
+        await migrateLocalLeaguePayloads();
         const leagueName = ui.newLeagueName.trim();
         ui.screen = "game";
         ui.tab = "dashboard";
         ui.profileOpen = false;
         createNewLeague(leagueName);
         ui.newLeagueName = "";
-        save();
+        await save();
         render();
       } catch (error) {
         console.error(error);
@@ -3114,10 +3208,10 @@
       }
     } else if (action === "importLeagueFromHub") {
       if (!confirmAction("Import this save as a separate league?")) return;
-      importLeagueFromText();
+      await importLeagueFromText();
     } else if (action === "advance") advance();
     else if (action === "returnHub") {
-      save();
+      await save();
       state = null;
       ui.screen = "hub";
       render();
@@ -3191,6 +3285,7 @@
       if (confirmAction("Start a separate clean league? Your current league will remain saved.")) {
         ui = { ...ui, tab: "dashboard", tradeMine: new Set(), tradeTheirs: new Set(), toast: "" };
         createNewLeague(ui.newLeagueName.trim());
+        await save();
         render();
       }
     }
