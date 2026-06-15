@@ -9,7 +9,7 @@
   const CURRENT_YEAR = 2026;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
-  const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v2";
+  const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v3";
 
   const ALL_ATTRS = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
   const POSITIONS = ["QB", "RB", "WR", "TE", "T", "OG", "C", "DE", "DT", "LB", "CB", "S", "K", "P"];
@@ -1072,7 +1072,7 @@
         height: body.height,
         weight: body.weight,
         age: prospectAge,
-        college: pick(COLLEGES),
+        college: "",
         year,
         trueOvr,
         truePot,
@@ -1090,12 +1090,38 @@
       players.push(prospect);
     }
     players.sort((a, b) => prospectGrade(b) - prospectGrade(a));
+    assignDraftClassColleges(players);
     players.forEach((prospect, index) => {
       prospect.rank = index + 1;
       prospect.projectedRound = clamp(Math.ceil((index + 1) / 32), 1, 7);
       prospect.comp = makePlayerComp(prospect);
     });
     return players;
+  }
+
+  function collegePositionLimit(pos, rankIndex) {
+    if (pos === "QB") return 1;
+    if (rankIndex >= 160) return 3;
+    if (["WR", "CB", "LB", "DE", "DT", "T", "OG", "S"].includes(pos)) return 2;
+    return 1;
+  }
+
+  function assignDraftClassColleges(players) {
+    const counts = {};
+    const topProgramCounts = {};
+    players.forEach((prospect, index) => {
+      const posCounts = counts[prospect.pos] ||= {};
+      const topLimit = index < 96 ? 5 : 99;
+      const candidates = shuffle(COLLEGES);
+      const limit = collegePositionLimit(prospect.pos, index);
+      let college = candidates.find(name => (posCounts[name] || 0) < limit && (topProgramCounts[name] || 0) < topLimit);
+      if (!college) {
+        college = candidates.slice().sort((a, b) => (posCounts[a] || 0) - (posCounts[b] || 0) || (topProgramCounts[a] || 0) - (topProgramCounts[b] || 0))[0];
+      }
+      prospect.college = college;
+      posCounts[college] = (posCounts[college] || 0) + 1;
+      if (index < 160) topProgramCounts[college] = (topProgramCounts[college] || 0) + 1;
+    });
   }
 
   function draftPotential(ovr) {
