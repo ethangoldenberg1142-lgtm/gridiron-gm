@@ -16,6 +16,22 @@
   const ROSTER_PLAN = { QB: 3, RB: 4, WR: 7, TE: 3, T: 4, OG: 4, C: 2, DE: 4, DT: 4, LB: 6, CB: 6, S: 4, K: 1, P: 1 };
   const POSITION_VALUE = { QB: 1.95, RB: 0.78, WR: 1.2, TE: 0.82, T: 1.18, OG: 0.76, C: 0.72, DE: 1.28, DT: 1.04, LB: 0.92, CB: 1.18, S: 0.82, K: 0.18, P: 0.13 };
   const REGRESSION_AGES = { QB: 34, RB: 28, WR: 30, TE: 31, T: 32, OG: 31, C: 32, DE: 31, DT: 31, LB: 30, CB: 30, S: 31, K: 36, P: 37 };
+  const POSITION_AGING = {
+    QB: { variance: 3.4, min: 27, max: 40, declineRate: 0.82, declineSpan: 8.8, warningYears: 2.2, volatility: 0.82 },
+    RB: { variance: 2.4, min: 24, max: 33, declineRate: 1.25, declineSpan: 5.8, warningYears: 2.7, volatility: 1.02 },
+    WR: { variance: 2.6, min: 25, max: 36, declineRate: 1.0, declineSpan: 6.8, warningYears: 2.4, volatility: 0.92 },
+    TE: { variance: 2.8, min: 26, max: 37, declineRate: 0.94, declineSpan: 7.2, warningYears: 2.2, volatility: 0.88 },
+    T: { variance: 2.8, min: 27, max: 38, declineRate: 0.88, declineSpan: 7.8, warningYears: 2.0, volatility: 0.82 },
+    OG: { variance: 2.7, min: 26, max: 37, declineRate: 0.92, declineSpan: 7.3, warningYears: 2.1, volatility: 0.84 },
+    C: { variance: 2.8, min: 27, max: 38, declineRate: 0.86, declineSpan: 7.8, warningYears: 2.0, volatility: 0.82 },
+    DE: { variance: 2.7, min: 26, max: 37, declineRate: 0.96, declineSpan: 7.0, warningYears: 2.3, volatility: 0.9 },
+    DT: { variance: 2.8, min: 26, max: 38, declineRate: 0.92, declineSpan: 7.4, warningYears: 2.2, volatility: 0.88 },
+    LB: { variance: 2.6, min: 25, max: 36, declineRate: 1.0, declineSpan: 6.8, warningYears: 2.4, volatility: 0.92 },
+    CB: { variance: 2.5, min: 25, max: 36, declineRate: 1.05, declineSpan: 6.4, warningYears: 2.5, volatility: 0.95 },
+    S: { variance: 2.7, min: 25, max: 37, declineRate: 0.96, declineSpan: 7.0, warningYears: 2.3, volatility: 0.9 },
+    K: { variance: 3.8, min: 29, max: 43, declineRate: 0.62, declineSpan: 9.5, warningYears: 1.7, volatility: 0.7 },
+    P: { variance: 3.8, min: 29, max: 44, declineRate: 0.6, declineSpan: 9.8, warningYears: 1.7, volatility: 0.68 }
+  };
   const ROOKIE_SCALE = [7.2, 4.2, 2.35, 1.45, 1.05, 0.92, 0.84];
   const MAX_ROSTER = 53;
   const TEAM_TARGET_OVR = {
@@ -602,6 +618,11 @@
     const devTrait = rookieProfile ? rookieProfile.devTrait : devTraitFor(base, pot);
     const ratings = makeRatingsForPosition(pos, base, pot);
     const contract = rookieProfile ? makeRookieContract(rookieProfile.round, rookieProfile.pickInRound, pos, base) : makeContract(pos, base, pot, age);
+    const hidden = {
+      bustGem: rookieProfile ? rookieProfile.bustGem : gaussian(0, 0.5),
+      workEthic: clamp(gaussian(0.55, 0.18), 0.1, 0.98),
+      longevity: clamp(gaussian(0.52, 0.22), 0.05, 0.98)
+    };
     return {
       id: id("p", "nextPlayerId"),
       firstName,
@@ -618,17 +639,27 @@
       pot,
       truePot: pot,
       devTrait,
-      regressionAge: Math.round(gaussian(REGRESSION_AGES[pos], pos === "QB" || pos === "K" || pos === "P" ? 2.6 : 1.8)),
+      regressionAge: generateRegressionAge(pos, hidden.longevity),
       injury: { status: "Healthy", weeks: 0, history: [], prone: clamp(gaussian(0.08, 0.04) + (pos === "RB" ? 0.05 : 0), 0.02, 0.28) },
       contract,
       stats: { season: blankStats(), career: blankStats(), history: [] },
       awards: [],
       morale: randInt(45, 85),
-      hidden: {
-        bustGem: rookieProfile ? rookieProfile.bustGem : gaussian(0, 0.5),
-        workEthic: clamp(gaussian(0.55, 0.18), 0.1, 0.98)
-      }
+      hidden
     };
+  }
+
+  function agingProfile(pos) {
+    return POSITION_AGING[pos] || { variance: 2.8, min: 25, max: 38, declineRate: 0.95, declineSpan: 7, warningYears: 2.2, volatility: 0.88 };
+  }
+
+  function generateRegressionAge(pos, longevity = 0.52) {
+    const profile = agingProfile(pos);
+    const median = REGRESSION_AGES[pos] || 31;
+    let age = gaussian(median + (longevity - 0.5) * profile.variance * 1.6, profile.variance);
+    if (chance(clamp(0.13 - longevity * 0.08, 0.03, 0.13))) age -= rand(1, 4);
+    if (chance(clamp(0.06 + longevity * 0.12, 0.07, 0.2))) age += rand(1, 4);
+    return Math.round(clamp(age, profile.min, profile.max));
   }
 
   function generateAge(pos, starterLine) {
@@ -1205,6 +1236,20 @@
     }
   }
 
+  function ensureDevelopmentFields(player) {
+    player.hidden ||= {};
+    if (typeof player.hidden.bustGem !== "number") player.hidden.bustGem = gaussian(0, 0.5);
+    if (typeof player.hidden.workEthic !== "number") player.hidden.workEthic = clamp(gaussian(0.55, 0.18), 0.1, 0.98);
+    if (typeof player.hidden.longevity !== "number") {
+      const median = REGRESSION_AGES[player.pos] || 31;
+      const existing = typeof player.regressionAge === "number" ? player.regressionAge : median;
+      player.hidden.longevity = clamp(0.5 + (existing - median) * 0.08 + gaussian(0, 0.1), 0.05, 0.98);
+    }
+    const profile = agingProfile(player.pos);
+    if (typeof player.regressionAge !== "number") player.regressionAge = generateRegressionAge(player.pos, player.hidden.longevity);
+    player.regressionAge = Math.round(clamp(player.regressionAge, profile.min, profile.max));
+  }
+
   function migrateState() {
     state.leagueId ||= newLeagueId();
     state.leagueName ||= "Detroit Wolverines League";
@@ -1221,6 +1266,7 @@
       player.ovr = player.ratings.ovr;
       player.pot = Math.max(player.pot || player.ovr, player.ovr);
       player.truePot = Math.max(player.truePot || player.pot, player.ovr);
+      ensureDevelopmentFields(player);
       player.injury ||= { status: "Healthy", weeks: 0, history: [], prone: 0.08 };
       player.injury.history ||= [];
       player.awards ||= [];
@@ -1237,6 +1283,7 @@
       player.ratings = normalizeRatingsForPosition(player.pos, player.ratings, player.ovr || player.ratings?.ovr || 60);
       player.ovr = player.ratings.ovr;
       player.pot = Math.max(player.pot || player.ovr, player.ovr);
+      ensureDevelopmentFields(player);
     }
     for (const draftClass of Object.values(state.draftClasses || {})) {
       for (const prospect of draftClass) {
@@ -1283,7 +1330,9 @@
     for (const team of state.teams) {
       const coaching = team.facilities.coaching;
       for (const player of teamPlayers(team.id)) {
-        if (player.age <= 25 && player.ovr < player.truePot && chance(0.16 + coaching * 0.012)) {
+        const growthWindow = clamp(((player.regressionAge || REGRESSION_AGES[player.pos]) - player.age + 3) / 10, 0, 1.2);
+        const growthChance = clamp(0.035 + Math.max(0, player.truePot - player.ovr) * 0.006 + growthWindow * 0.075 + coaching * 0.006, 0.01, 0.24);
+        if (player.ovr < player.truePot && chance(growthChance)) {
           adjustPlayer(player, rand(0.12, 0.45));
         }
         maybePracticeInjury(player, team);
@@ -1859,12 +1908,14 @@
   function applyWeeklyProgression() {
     for (const team of state.teams) {
       for (const player of teamPlayers(team.id)) {
-        if (player.age <= 25 && player.ovr < player.truePot && chance(0.12 + team.facilities.coaching * 0.008)) {
-          const production = weeklyProductionScore(player);
-          adjustPlayer(player, rand(0.03, 0.18) + production * 0.005);
-        } else if (player.age > player.regressionAge && chance(0.05)) {
-          adjustPlayer(player, -rand(0.03, 0.13));
-        }
+        const production = weeklyProductionScore(player);
+        const potentialGap = player.truePot - player.ovr;
+        const ageGap = player.age - (player.regressionAge || REGRESSION_AGES[player.pos]);
+        const injuryWeeks = recentInjuryWeeks(player, 1);
+        const growthChance = clamp(0.035 + Math.max(0, potentialGap) * 0.005 + Math.max(0, 26 - player.age) * 0.014 + team.facilities.coaching * 0.004 + production * 0.0008 - Math.max(0, ageGap) * 0.009, 0.005, 0.22);
+        const declineChance = clamp((ageGap + 2) * 0.009 + injuryWeeks * 0.0009 + Math.max(0, player.ovr - player.truePot) * 0.003 - production * 0.0006, 0, 0.11);
+        if (chance(growthChance)) adjustPlayer(player, rand(0.03, 0.18) + production * 0.003);
+        else if (chance(declineChance)) adjustPlayer(player, -rand(0.03, 0.16));
       }
     }
   }
@@ -1879,15 +1930,34 @@
     return 0;
   }
 
-  function adjustPlayer(player, amount) {
-    const attrsByPos = {
+  function recentInjuryWeeks(player, yearsBack = 2) {
+    return (player.injury?.history || []).filter(injury => injury.year >= state.year - yearsBack).reduce((sum, injury) => sum + injury.weeks, 0);
+  }
+
+  function recentMajorInjuries(player, yearsBack = 3) {
+    return (player.injury?.history || []).filter(injury => injury.year >= state.year - yearsBack && injury.weeks >= 8).length;
+  }
+
+  function developmentAttrsForPosition(pos, direction) {
+    const growth = {
       QB: ["thp", "tha", "awr"], RB: ["spd", "agi", "acc", "car", "trk"], WR: ["spd", "cth", "rr", "acc"], TE: ["cth", "rr", "rbk", "str"],
       T: ["pbk", "rbk", "str", "awr"], OG: ["pbk", "rbk", "str", "awr"], C: ["pbk", "rbk", "str", "awr"], DE: ["fmv", "pmv", "bshed", "tak"],
       DT: ["pmv", "bshed", "str", "tak"], LB: ["tak", "bshed", "zon", "awr"], CB: ["man", "zon", "prs", "spd"], S: ["zon", "tak", "man", "awr"],
       K: ["kpw", "kac", "awr"], P: ["kpw", "kac", "awr"]
-    }[player.pos];
+    };
+    const decline = {
+      QB: ["thp", "tha", "agi", "acc", "sta"], RB: ["spd", "agi", "acc", "car", "trk", "sta"], WR: ["spd", "acc", "agi", "cth", "rr", "sta"], TE: ["spd", "acc", "cth", "rr", "rbk", "str"],
+      T: ["pbk", "rbk", "str", "agi", "sta"], OG: ["pbk", "rbk", "str", "agi", "sta"], C: ["pbk", "rbk", "str", "awr", "sta"], DE: ["fmv", "pmv", "bshed", "acc", "str", "tak"],
+      DT: ["pmv", "bshed", "str", "acc", "tak"], LB: ["spd", "acc", "tak", "bshed", "zon"], CB: ["spd", "acc", "agi", "man", "zon", "prs"], S: ["spd", "acc", "zon", "tak", "man"],
+      K: ["kpw", "kac"], P: ["kpw", "kac"]
+    };
+    return (direction >= 0 ? growth[pos] : decline[pos]) || primaryAttrsForPosition(pos);
+  }
+
+  function adjustPlayer(player, amount) {
     const direction = amount >= 0 ? 1 : -1;
     const chancePerAttr = clamp(Math.abs(amount), 0.02, 1);
+    const attrsByPos = developmentAttrsForPosition(player.pos, direction);
     for (const attr of attrsByPos) {
       if (chance(chancePerAttr)) {
         const { min, max } = attrBounds(player.pos, attr);
@@ -1895,6 +1965,8 @@
       }
     }
     updateOverall(player);
+    if (player.ovr > player.pot) player.pot = player.ovr;
+    if (player.ovr > player.truePot) player.truePot = player.ovr;
   }
 
   function collectWeeklyFinance() {
@@ -2015,10 +2087,14 @@
   function processRetirements() {
     const retired = [];
     for (const player of state.players.slice()) {
-      const injuryPenalty = player.injury.history.filter(injury => injury.weeks >= 8).length * 0.07;
-      const agePressure = (player.age - REGRESSION_AGES[player.pos]) * 0.08;
+      const profile = agingProfile(player.pos);
+      const injuryPenalty = recentMajorInjuries(player, 4) * 0.07 + recentInjuryWeeks(player, 2) * 0.008;
+      const ageGap = player.age - (player.regressionAge || REGRESSION_AGES[player.pos]);
+      const agePressure = ageGap * 0.055 + Math.max(0, player.age - profile.max + 1) * 0.08;
       const playingTime = player.stats.season.games < 6 ? 0.08 : 0;
-      if (player.age >= 31 && chance(clamp(agePressure + injuryPenalty + playingTime, 0, 0.65))) {
+      const rolePressure = player.ovr < 66 && player.age >= player.regressionAge - 1 ? 0.08 : 0;
+      const minRetirementAge = player.pos === "RB" ? 29 : (player.pos === "K" || player.pos === "P" ? 34 : 31);
+      if (player.age >= minRetirementAge && chance(clamp(agePressure + injuryPenalty + playingTime + rolePressure, 0, 0.65))) {
         retired.push(player);
         const team = getTeam(player.teamId);
         if (team) team.retiredPending.push(player.id);
@@ -2052,20 +2128,45 @@
     render();
   }
 
+  function developmentDelta(player, team) {
+    const profile = agingProfile(player.pos);
+    const performance = weeklyProductionScore(player);
+    const games = player.stats?.season?.games || 0;
+    const potentialGap = player.truePot - player.ovr;
+    const ageGap = player.age - (player.regressionAge || REGRESSION_AGES[player.pos]);
+    const longevity = player.hidden?.longevity ?? 0.5;
+    const workEthic = player.hidden?.workEthic ?? 0.55;
+    const bustGem = player.hidden?.bustGem ?? 0;
+    const injuryWeeks = recentInjuryWeeks(player, 2);
+    const majorInjuries = recentMajorInjuries(player, 3);
+    const growthWindow = clamp(((player.regressionAge || REGRESSION_AGES[player.pos]) - player.age + 3) / 9, 0, 1.25);
+    const declinePressure = clamp((ageGap + profile.warningYears) / profile.declineSpan, 0, 1.85);
+    const potentialGrowth = Math.max(0, potentialGap) * (0.028 + growthWindow * 0.045);
+    const overCapDrag = Math.max(0, -potentialGap) * 0.035;
+    const performanceBonus = clamp(performance * 0.035, -0.85, 1.15);
+    const playingTime = games >= 10 ? 0.08 : (games > 0 && games < 6 ? -0.25 : 0);
+    const coachingBonus = ((team.facilities.coaching || 5) - 5) * 0.075;
+    const workBonus = (workEthic - 0.5) * 0.85 + bustGem * 0.48;
+    const injuryPenalty = injuryWeeks * 0.032 + majorInjuries * 0.22 + Math.max(0, 72 - (player.ratings.inj || 72)) * 0.008;
+    const eliteDrag = Math.max(0, player.ovr - 88) * 0.055;
+    const declineMean = declinePressure * profile.declineRate * (0.72 + Math.max(0, player.ovr - 72) * 0.016) * (1.12 - longevity * 0.36);
+    const mean = potentialGrowth + performanceBonus + playingTime + coachingBonus + workBonus - declineMean - injuryPenalty - eliteDrag - overCapDrag;
+    const volatility = profile.volatility + Math.max(0, ageGap) * 0.045 + injuryWeeks * 0.006 + Math.max(0, Math.abs(bustGem) - 0.7) * 0.12;
+    return clamp(gaussian(mean, volatility), -5.5, 4.8);
+  }
+
+  function applyDevelopmentDelta(player, delta) {
+    let steps = Math.floor(Math.abs(delta));
+    if (chance(Math.abs(delta) - steps)) steps += 1;
+    for (let i = 0; i < steps; i += 1) {
+      adjustPlayer(player, delta > 0 ? rand(0.45, 0.9) : -rand(0.45, 0.9));
+    }
+  }
+
   function offseasonProgression() {
     for (const team of state.teams) {
-      const coaching = team.facilities.coaching;
       for (const player of teamPlayers(team.id)) {
-        const age = player.age;
-        const performance = weeklyProductionScore(player);
-        let delta = 0;
-        if (age <= 25) delta += rand(0.4, 2.0) + (player.truePot - player.ovr) * 0.09 + coaching * 0.07 + performance * 0.045;
-        else if (age <= player.regressionAge) delta += rand(-0.6, 0.9) + Math.max(0, player.truePot - player.ovr) * 0.025 + performance * 0.025;
-        else delta -= rand(0.5, 2.4) + (age - player.regressionAge) * rand(0.25, 0.7);
-        delta += player.hidden.bustGem * 0.65 + player.hidden.workEthic * 0.5;
-        delta -= player.injury.history.filter(injury => injury.year >= state.year - 2).reduce((sum, injury) => sum + injury.weeks, 0) * 0.028;
-        const steps = Math.round(Math.abs(delta));
-        for (let i = 0; i < steps; i += 1) adjustPlayer(player, delta > 0 ? rand(0.45, 0.9) : -rand(0.45, 0.9));
+        applyDevelopmentDelta(player, developmentDelta(player, team));
         player.age += 1;
         player.yearsPro += 1;
         player.stats.history.push({ year: state.year, ...player.stats.season, ovr: player.ovr, team: getTeam(player.teamId)?.abbr || "FA" });
@@ -2825,7 +2926,7 @@
         <div class="split"><div><strong>${playerName(player)}</strong><div class="muted">${player.pos} - ${playerStatus(player)} - ${player.college}</div></div><span class="pill light">${player.devTrait}</span></div>
         <div class="metric-row">
           <div class="metric"><label>Overall</label><strong>${player.ovr}</strong><span>Potential ${player.pot}</span></div>
-          <div class="metric"><label>Age</label><strong>${player.age}</strong><span>Regresses near ${player.regressionAge}</span></div>
+          <div class="metric"><label>Age</label><strong>${player.age}</strong><span>Aging midpoint ${player.regressionAge}</span></div>
           <div class="metric"><label>Trade Value</label><strong>${playerTradeValue(player)}</strong><span>contract adjusted</span></div>
           <div class="metric"><label>Cap Hit</label><strong>${money(currentCap)}</strong><span>${contractSummary(player)}</span></div>
         </div>
