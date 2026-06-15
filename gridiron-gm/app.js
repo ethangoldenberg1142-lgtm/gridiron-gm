@@ -9,6 +9,7 @@
   const CURRENT_YEAR = 2026;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
+  const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v1";
 
   const ALL_ATTRS = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
   const POSITIONS = ["QB", "RB", "WR", "TE", "T", "OG", "C", "DE", "DT", "LB", "CB", "S", "K", "P"];
@@ -39,7 +40,7 @@
     BUF: 86.5, CIN: 86, DAL: 85, HOU: 85, LAR: 84, GB: 83.5, MIA: 83.5, LAC: 82.5,
     MIN: 81.5, PIT: 81, SEA: 80.5, TB: 80.5, WAS: 80, ATL: 79.5, DEN: 79, CHI: 78.5, ARI: 78, JAX: 77.5, LV: 77, IND: 76.5,
     NYJ: 75.5, NE: 75, CLE: 74.5, NO: 74, TEN: 73, CAR: 72, NYG: 72,
-    DET: 68.8
+    DET: 65.8
   };
   const ROSTER_SLOT_OFFSETS = {
     QB: [2, -12, -21],
@@ -58,6 +59,22 @@
     P: [-10]
   };
   const PREMIUM_POSITIONS = new Set(["QB", "WR", "T", "DE", "DT", "CB"]);
+  const BODY_PROFILES = {
+    QB: { h: [75, 2.1, 70, 79], w: [222, 13, 200, 245] },
+    RB: { h: [70, 1.8, 66, 74], w: [214, 13, 190, 235] },
+    WR: { h: [73, 2.7, 68, 79], w: [202, 14, 175, 230] },
+    TE: { h: [77, 1.7, 73, 80], w: [250, 13, 225, 275] },
+    T: { h: [78, 1.7, 75, 81], w: [318, 17, 285, 355] },
+    OG: { h: [76, 1.4, 73, 79], w: [314, 17, 285, 350] },
+    C: { h: [75, 1.3, 72, 78], w: [306, 15, 280, 335] },
+    DE: { h: [76, 2.0, 72, 80], w: [266, 22, 235, 305] },
+    DT: { h: [75, 1.7, 72, 79], w: [306, 24, 275, 360] },
+    LB: { h: [74, 1.8, 70, 78], w: [238, 14, 215, 260] },
+    CB: { h: [71, 2.0, 67, 76], w: [194, 11, 175, 215] },
+    S: { h: [72, 1.9, 68, 77], w: [207, 12, 185, 230] },
+    K: { h: [72, 2.2, 67, 77], w: [202, 16, 175, 230] },
+    P: { h: [73, 2.3, 68, 78], w: [210, 17, 185, 240] }
+  };
   const DEFAULT_ATTR_PROFILE = {
     spd: [-8, 8, 35, 92], str: [-8, 10, 30, 94], agi: [-8, 8, 35, 92], acc: [-7, 8, 35, 92],
     awr: [-2, 7, 35, 96], inj: [2, 9, 45, 99], sta: [4, 7, 55, 99], tgh: [1, 8, 45, 99],
@@ -157,6 +174,7 @@
     tradeTheirs: new Set(),
     toast: "",
     newLeagueName: "",
+    newLeagueMode: "standard",
     importText: ""
   };
 
@@ -219,6 +237,27 @@
     const u = Math.max(0.000001, seededUnit(`${seed}:u`));
     const v = Math.max(0.000001, seededUnit(`${seed}:v`));
     return mean + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  function makeSeededRandom(seed) {
+    let value = hashString(seed) || 1;
+    return () => {
+      value |= 0;
+      value = value + 0x6D2B79F5 | 0;
+      let t = Math.imul(value ^ value >>> 15, 1 | value);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function withRandomSeed(seed, fn) {
+    const originalRandom = Math.random;
+    Math.random = makeSeededRandom(seed);
+    try {
+      return fn();
+    } finally {
+      Math.random = originalRandom;
+    }
   }
 
   function id(prefix, nextKey) {
@@ -507,45 +546,48 @@
     }
   }
 
-  function createNewLeague(name = "") {
-    state = {
-      version: 1,
-      leagueId: newLeagueId(),
-      leagueName: name || `Detroit Rebuild ${new Date().toLocaleDateString()}`,
-      year: CURRENT_YEAR,
-      phase: "regular",
-      week: 1,
-      playoffRound: "",
-      currentDraft: null,
-      nextPlayerId: 0,
-      nextGameId: 0,
-      teams: [],
-      players: [],
-      freeAgents: [],
-      draftClasses: {},
-      schedule: [],
-      games: [],
-      awardsHistory: [],
-      retiredPlayers: [],
-      records: initialRecords(),
-      news: [],
-      gm: { teamId: USER_TEAM_ID, jobSecurity: 72, seasons: 0, fired: false },
-      lastAdvance: Date.now()
-    };
+  function createNewLeague(name = "", mode = "standard") {
+    const build = () => {
+      state = {
+        version: 1,
+        leagueId: newLeagueId(),
+        leagueName: name || `Detroit Rebuild ${new Date().toLocaleDateString()}`,
+        leagueMode: mode,
+        year: CURRENT_YEAR,
+        phase: "regular",
+        week: 1,
+        playoffRound: "",
+        currentDraft: null,
+        nextPlayerId: 0,
+        nextGameId: 0,
+        teams: [],
+        players: [],
+        freeAgents: [],
+        draftClasses: {},
+        schedule: [],
+        games: [],
+        awardsHistory: [],
+        retiredPlayers: [],
+        records: initialRecords(),
+        news: [],
+        gm: { teamId: USER_TEAM_ID, jobSecurity: 72, seasons: 0, fired: false },
+        lastAdvance: Date.now()
+      };
 
-    state.teams = TEAM_DEFS.map((teamDef, index) => makeTeam(teamDef, index));
-    for (const team of state.teams) {
-      generateRoster(team);
-      buildDepthChart(team.id);
-      assignStarterContracts(team.id);
-    }
-    generateFreeAgents(170);
-    for (let year = CURRENT_YEAR + 1; year <= CURRENT_YEAR + 3; year += 1) {
-      state.draftClasses[String(year)] = generateDraftClass(year);
-    }
-    state.schedule = buildSeasonSchedule();
-    resetSeasonStats();
-    addNews("League created", "Offseason training, free agency, and roster setup are complete. Week 1 is ready.");
+      state.teams = TEAM_DEFS.map((teamDef, index) => makeTeam(teamDef, index));
+      for (const team of state.teams) {
+        generateRoster(team);
+        buildDepthChart(team.id);
+        assignStarterContracts(team.id);
+      }
+      generateFreeAgents(170);
+      ensureFutureDraftClasses(CURRENT_YEAR + 1);
+      state.schedule = buildSeasonSchedule();
+      resetSeasonStats();
+      addNews("League created", `${mode === "standard" ? "Standard" : "Randomized"} roster set loaded. Offseason training, free agency, and roster setup are complete. Week 1 is ready.`);
+    };
+    if (mode === "standard") return withRandomSeed(STANDARD_LEAGUE_SEED, build);
+    return build();
   }
 
   function makeTeam(teamDef, index) {
@@ -618,6 +660,7 @@
     const devTrait = rookieProfile ? rookieProfile.devTrait : devTraitFor(base, pot);
     const ratings = makeRatingsForPosition(pos, base, pot);
     const contract = rookieProfile ? makeRookieContract(rookieProfile.round, rookieProfile.pickInRound, pos, base) : makeContract(pos, base, pot, age);
+    const body = rookieProfile?.height && rookieProfile?.weight ? { height: rookieProfile.height, weight: rookieProfile.weight } : makeBody(pos);
     const hidden = {
       bustGem: rookieProfile ? rookieProfile.bustGem : gaussian(0, 0.5),
       workEthic: clamp(gaussian(0.55, 0.18), 0.1, 0.98),
@@ -628,6 +671,8 @@
       firstName,
       lastName,
       pos,
+      height: body.height,
+      weight: body.weight,
       age,
       yearsPro,
       teamId,
@@ -660,6 +705,46 @@
     if (chance(clamp(0.13 - longevity * 0.08, 0.03, 0.13))) age -= rand(1, 4);
     if (chance(clamp(0.06 + longevity * 0.12, 0.07, 0.2))) age += rand(1, 4);
     return Math.round(clamp(age, profile.min, profile.max));
+  }
+
+  function bodyProfile(pos) {
+    return BODY_PROFILES[pos] || BODY_PROFILES.LB;
+  }
+
+  function makeBody(pos) {
+    const profile = bodyProfile(pos);
+    const height = Math.round(clamp(gaussian(profile.h[0], profile.h[1]), profile.h[2], profile.h[3]));
+    const weight = Math.round(clamp(gaussian(profile.w[0], profile.w[1]), profile.w[2], profile.w[3]));
+    return { height, weight };
+  }
+
+  function formatHeight(inches) {
+    if (!inches) return "";
+    return `${Math.floor(inches / 12)}'${inches % 12}"`;
+  }
+
+  function sizeLabel(player) {
+    return `${formatHeight(player.height)} / ${player.weight || ""} lb`;
+  }
+
+  function bodyRoleAdjustment(player, role) {
+    if (!player?.height || !player?.weight) return 0;
+    const profile = bodyProfile(player.pos);
+    const heightEdge = player.height - profile.h[0];
+    const weightEdge = (player.weight - profile.w[0]) / 10;
+    if (["passBlock", "runBlock"].includes(role)) return clamp(heightEdge * 0.35 + weightEdge * 0.55, -3.5, 4);
+    if (role === "passRush") return clamp(heightEdge * 0.25 + weightEdge * 0.18, -2.5, 2.8);
+    if (role === "runStop") return clamp(weightEdge * 0.6 + heightEdge * 0.12, -3, 4);
+    if (role === "receiver") return clamp(heightEdge * 0.32 + weightEdge * 0.08, -2.5, 3);
+    if (role === "coverage") return clamp(heightEdge * 0.28 - Math.max(0, weightEdge) * 0.05, -2, 2.5);
+    if (role === "runner") return clamp(weightEdge * 0.22 - Math.max(0, heightEdge) * 0.08, -1.8, 2);
+    if (role === "tackling") return clamp(weightEdge * 0.28 + heightEdge * 0.08, -2, 2.5);
+    return 0;
+  }
+
+  function receiverCoverageSizeEdge(receiver, defender) {
+    if (!receiver || !defender) return 0;
+    return clamp((receiver.height - defender.height) * 0.45 + ((receiver.weight - defender.weight) / 10) * 0.08, -3, 3.5);
   }
 
   function generateAge(pos, starterLine) {
@@ -909,12 +994,16 @@
       }
       trueOvr = clamp(trueOvr, 39, 85);
       truePot = clamp(truePot, Math.max(40, trueOvr - 5), 99);
+      const body = makeBody(pos);
+      const prospectAge = randInt(20, 23);
       const prospect = {
         id: `d${year}-${i + 1}`,
         firstName: pick(FIRST_NAMES),
         lastName: pick(LAST_NAMES),
         pos,
-        age: randInt(20, 23),
+        height: body.height,
+        weight: body.weight,
+        age: prospectAge,
         college: pick(COLLEGES),
         year,
         trueOvr,
@@ -925,6 +1014,7 @@
         ratings: makeRatingsForPosition(pos, trueOvr, truePot),
         combine: makeCombine(pos, trueOvr),
         collegeStats: makeCollegeStats(pos, trueOvr, truePot),
+        collegeAwards: makeCollegeAwards(pos, trueOvr, truePot, prospectAge),
         comp: "",
         rank: 0,
         projectedRound: 7
@@ -973,8 +1063,22 @@
     return `${round(rand(42, 49), 1)} punt avg, ${randInt(12, 31)} inside 20`;
   }
 
+  function makeCollegeAwards(pos, ovr, pot, age) {
+    const grade = ovr * 0.62 + pot * 0.38;
+    const seasons = clamp(age - 18, 1, 4);
+    const experience = seasons / 4;
+    const awards = [];
+    if (age <= 20 && grade >= 82 && chance(0.38)) awards.push("Freshman All-American");
+    if (grade >= 84 && chance(0.24 + experience * 0.32)) awards.push(`${pick(["1st", "2nd"])} Team All-Conference`);
+    if (grade >= 88 && chance(0.18 + experience * 0.3)) awards.push("All-American");
+    if (grade >= 91 && ["QB", "RB", "WR"].includes(pos) && chance((0.16 + experience * 0.25))) awards.push("Heisman finalist");
+    if (grade >= 94 && pos === "QB" && chance(0.08 + experience * 0.16)) awards.push("National QB of the Year");
+    if (grade >= 92 && ["DE", "DT", "LB", "CB", "S"].includes(pos) && chance(0.1 + experience * 0.22)) awards.push("Defensive Player of the Year finalist");
+    return awards;
+  }
+
   function makePlayerComp(prospect) {
-    const comps = state.players.filter(player => player.pos === prospect.pos).sort((a, b) => Math.abs(b.ovr - prospect.trueOvr) - Math.abs(a.ovr - prospect.trueOvr));
+    const comps = state.players.filter(player => player.pos === prospect.pos).sort((a, b) => Math.abs(a.ovr - prospect.trueOvr) - Math.abs(b.ovr - prospect.trueOvr));
     const veteran = comps.length ? pick(comps.slice(0, Math.min(30, comps.length))) : null;
     const styles = ["bigger", "raw", "polished", "faster", "higher-variance", "safer", "more physical"];
     return veteran ? `${pick(styles)} ${playerName(veteran)}` : `${pick(styles)} starter profile`;
@@ -1250,6 +1354,13 @@
     player.regressionAge = Math.round(clamp(player.regressionAge, profile.min, profile.max));
   }
 
+  function ensureBodyFields(player) {
+    if (typeof player.height === "number" && typeof player.weight === "number") return;
+    const body = makeBody(player.pos);
+    player.height = body.height;
+    player.weight = body.weight;
+  }
+
   function migrateState() {
     state.leagueId ||= newLeagueId();
     state.leagueName ||= "Detroit Wolverines League";
@@ -1266,6 +1377,7 @@
       player.ovr = player.ratings.ovr;
       player.pot = Math.max(player.pot || player.ovr, player.ovr);
       player.truePot = Math.max(player.truePot || player.pot, player.ovr);
+      ensureBodyFields(player);
       ensureDevelopmentFields(player);
       player.injury ||= { status: "Healthy", weeks: 0, history: [], prone: 0.08 };
       player.injury.history ||= [];
@@ -1283,6 +1395,7 @@
       player.ratings = normalizeRatingsForPosition(player.pos, player.ratings, player.ovr || player.ratings?.ovr || 60);
       player.ovr = player.ratings.ovr;
       player.pot = Math.max(player.pot || player.ovr, player.ovr);
+      ensureBodyFields(player);
       ensureDevelopmentFields(player);
     }
     for (const draftClass of Object.values(state.draftClasses || {})) {
@@ -1291,6 +1404,8 @@
         prospect.trueOvr = prospect.ratings.ovr;
         prospect.truePot = Math.max(prospect.truePot || prospect.trueOvr, prospect.trueOvr);
         prospect.pot = prospect.truePot;
+        ensureBodyFields(prospect);
+        prospect.collegeAwards ||= makeCollegeAwards(prospect.pos, prospect.trueOvr, prospect.truePot, prospect.age || 21);
       }
     }
   }
@@ -1646,7 +1761,8 @@
       kick: { kac: 0.45, kpw: 0.43, awr: 0.12 },
       punt: { kpw: 0.48, kac: 0.34, awr: 0.18 }
     }[role];
-    return round(clamp(weights ? weightedAttrs(r, weights) : computeOverall(player.pos, r), 20, 99), 1);
+    const base = weights ? weightedAttrs(r, weights) : computeOverall(player.pos, r);
+    return round(clamp(base + bodyRoleAdjustment(player, role), 20, 99), 1);
   }
 
   function unitRating(team, pos, count, role = null) {
@@ -1685,7 +1801,7 @@
     const oppOffense = offensiveRating(opponent);
     const topWr = wr[0];
     const topCb = starters(opponent, "CB", 1)[0];
-    const wrCb = playerSkill(topWr, "receiver") - playerSkill(topCb, "coverage");
+    const wrCb = playerSkill(topWr, "receiver") - playerSkill(topCb, "coverage") + receiverCoverageSizeEdge(topWr, topCb);
     const oppPassRush = unitRating(opponent, "DE", 2, "passRush") * 0.62 + unitRating(opponent, "DT", 2, "passRush") * 0.38;
     const oppRunStop = unitRating(opponent, "DT", 2, "runStop") * 0.4 + unitRating(opponent, "LB", 3, "runStop") * 0.42 + unitRating(opponent, "DE", 2, "runStop") * 0.18;
     const passEdge = (qbPass - 70) * 0.42 + wrCb * 0.2 + (passBlock - oppPassRush) * 0.18 + (wrRoute - defensiveCoverageRating(opponent)) * 0.11 + (weather.pass - 1) * 35;
@@ -2393,6 +2509,8 @@
       pot: prospect.truePot,
       devTrait: prospect.devTrait,
       bustGem: prospect.bustGem,
+      height: prospect.height,
+      weight: prospect.weight,
       round: pickInfo.round,
       pickInRound: pickInfo.pickInRound
     });
@@ -2434,12 +2552,17 @@
 
   function finishDraft() {
     if (state.currentDraft) state.currentDraft.complete = true;
+    if (state.currentDraft?.year) {
+      delete state.draftClasses[String(state.currentDraft.year)];
+      ensureFutureDraftClasses(state.currentDraft.year + 1);
+      ui.draftYear = state.currentDraft.year + 1;
+    }
     state.phase = "offseason";
     addNews("Draft complete", "The draft is complete. Offseason setup will roll into the next preseason.");
   }
 
-  function ensureFutureDraftClasses() {
-    for (let year = state.year + 1; year <= state.year + 3; year += 1) {
+  function ensureFutureDraftClasses(startYear = state.year + 1) {
+    for (let year = startYear; year <= startYear + 2; year += 1) {
       if (!state.draftClasses[String(year)]) state.draftClasses[String(year)] = generateDraftClass(year);
     }
   }
@@ -2733,6 +2856,10 @@
               <div class="panel-header"><h3>Start Or Import</h3></div>
               <div class="panel-body stack">
                 <input data-control="newLeagueName" placeholder="League name" value="${escapeAttr(ui.newLeagueName || "")}">
+                <select data-control="newLeagueMode">
+                  <option value="standard" ${ui.newLeagueMode === "standard" ? "selected" : ""}>Standard Set</option>
+                  <option value="random" ${ui.newLeagueMode === "random" ? "selected" : ""}>Randomized Set</option>
+                </select>
                 <button class="primary" data-action="createLeague">Start Clean League</button>
                 <textarea data-control="importText" placeholder="Paste exported save JSON">${escapeHtml(ui.importText)}</textarea>
                 <button data-action="importLeagueFromHub">Import Save As League</button>
@@ -2897,7 +3024,7 @@
   }
 
   function renderRosterTable(players) {
-    return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th>Injury</th><th>Contract</th><th class="num">Cap</th><th class="num">Release</th><th></th></tr></thead><tbody>
+    return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th>Injury</th><th>Contract</th><th class="num">Cap</th><th class="num">Release</th><th></th></tr></thead><tbody>
       ${players.map(player => {
         const dead = deadCapIfRelease(player);
         const savings = capHit(player) - dead.current;
@@ -2905,6 +3032,7 @@
           <td>${player.pos}</td>
           <td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td>
           <td class="num">${player.age}</td>
+          <td>${sizeLabel(player)}</td>
           <td class="num">${player.ovr}</td>
           <td class="num">${player.pot}</td>
           <td>${injuryLabel(player)}</td>
@@ -2927,6 +3055,7 @@
         <div class="metric-row">
           <div class="metric"><label>Overall</label><strong>${player.ovr}</strong><span>Potential ${player.pot}</span></div>
           <div class="metric"><label>Age</label><strong>${player.age}</strong><span>Aging midpoint ${player.regressionAge}</span></div>
+          <div class="metric"><label>Size</label><strong>${formatHeight(player.height)}</strong><span>${player.weight} lb</span></div>
           <div class="metric"><label>Trade Value</label><strong>${playerTradeValue(player)}</strong><span>contract adjusted</span></div>
           <div class="metric"><label>Cap Hit</label><strong>${money(currentCap)}</strong><span>${contractSummary(player)}</span></div>
         </div>
@@ -2955,7 +3084,7 @@
           <table><tbody>${(team.depthChart[pos] || []).map((playerId, index) => {
             const player = getPlayer(playerId);
             if (!player) return "";
-            return `<tr><td class="num">${index + 1}</td><td><button class="link-button" data-action="selectPlayerTab" data-player="${player.id}">${playerName(player)}</button></td><td class="num">${player.ovr}</td><td>${injuryLabel(player)}</td><td><span class="compact-actions"><button data-action="depthUp" data-pos="${pos}" data-player="${player.id}">Up</button><button data-action="depthDown" data-pos="${pos}" data-player="${player.id}">Dn</button></span></td></tr>`;
+            return `<tr><td class="num">${index + 1}</td><td><button class="link-button" data-action="selectPlayerTab" data-player="${player.id}">${playerName(player)}</button><div class="muted">${sizeLabel(player)}</div></td><td class="num">${player.ovr}</td><td>${injuryLabel(player)}</td><td><span class="compact-actions"><button data-action="depthUp" data-pos="${pos}" data-player="${player.id}">Up</button><button data-action="depthDown" data-pos="${pos}" data-player="${player.id}">Dn</button></span></td></tr>`;
           }).join("")}</tbody></table>
         </div>
       `).join("")}</div>
@@ -3001,8 +3130,8 @@
 
   function renderPlayerSpreadsheet(players) {
     const attrs = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
-    return `<table><thead><tr><th>Pos</th><th>Name</th><th>Status</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th>Contract</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">Rush Yds</th><th class="num">Rec Yds</th><th class="num">Sacks</th><th class="num">INT</th><th class="num">Value</th>${attrs.map(attr => `<th class="num">${attr.toUpperCase()}</th>`).join("")}</tr></thead><tbody>
-      ${players.map(player => `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${playerStatus(player)}</td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td>${attrs.map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr>`).join("")}
+    return `<table><thead><tr><th>Pos</th><th>Name</th><th>Status</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th>Contract</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">Rush Yds</th><th class="num">Rec Yds</th><th class="num">Sacks</th><th class="num">INT</th><th class="num">Value</th>${attrs.map(attr => `<th class="num">${attr.toUpperCase()}</th>`).join("")}</tr></thead><tbody>
+      ${players.map(player => `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${playerStatus(player)}</td><td class="num">${player.age}</td><td>${sizeLabel(player)}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td>${attrs.map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr>`).join("")}
     </tbody></table>`;
   }
 
@@ -3057,6 +3186,7 @@
     const qbPass = playerSkill(qb, "qbPass");
     const wrSkill = playerSkill(wr, "receiver");
     const cbSkill = playerSkill(cb, "coverage");
+    const wrSizeEdge = receiverCoverageSizeEdge(wr, cb);
     const rbSkill = playerSkill(rb, "runner");
     const lbRunStop = unitRating(def, "LB", 3, "runStop");
     const passRush = unitRating(def, "DE", 2, "passRush") * 0.62 + unitRating(def, "DT", 2, "passRush") * 0.38;
@@ -3074,7 +3204,7 @@
         label: `${off.abbr} WR-CB`,
         offense: wr ? `${playerName(wr)} ${round(wrSkill, 1)} REC` : "WR room",
         defense: cb ? `${playerName(cb)} ${round(cbSkill, 1)} COV` : "CB room",
-        edge: wrSkill - cbSkill,
+        edge: wrSkill - cbSkill + wrSizeEdge,
         impact: "target share, third downs"
       },
       {
@@ -3158,8 +3288,8 @@
       <select data-control="historyYear"><option value="ALL">All years</option>${years.map(year => `<option value="${year}" ${String(ui.historyYear) === String(year) ? "selected" : ""}>${year}</option>`).join("")}</select>
       <select data-control="playerSort">${["ovr", "passYds", "passTd", "rushYds", "rushTd", "recYds", "recTd", "int", "defInt", "sacks", "tackles", "value"].map(key => `<option value="${key}" ${ui.playerSort === key ? "selected" : ""}>${key}</option>`).join("")}</select>
     </div>
-    <div class="table-wrap"><table><thead><tr><th class="num">Year</th><th>Pos</th><th>Name</th><th>Team</th><th class="num">Ovr</th><th class="num">G</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">INT</th><th class="num">Rush Yds</th><th class="num">Rush TD</th><th class="num">Rec</th><th class="num">Rec Yds</th><th class="num">Rec TD</th><th class="num">Tk</th><th class="num">TFL</th><th class="num">Sk</th><th class="num">Def INT</th></tr></thead><tbody>
-      ${rows.slice(0, 600).map(({ player, season }) => `<tr><td class="num">${season.year}</td><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${season.team}</td><td class="num">${season.ovr}</td><td class="num">${season.games}</td><td class="num">${season.passYds}</td><td class="num">${season.passTd}</td><td class="num">${season.int}</td><td class="num">${season.rushYds}</td><td class="num">${season.rushTd}</td><td class="num">${season.rec}</td><td class="num">${season.recYds}</td><td class="num">${season.recTd}</td><td class="num">${season.tackles}</td><td class="num">${season.tfl}</td><td class="num">${season.sacks}</td><td class="num">${season.defInt}</td></tr>`).join("")}
+    <div class="table-wrap"><table><thead><tr><th class="num">Year</th><th>Pos</th><th>Name</th><th>Team</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">G</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">INT</th><th class="num">Rush Yds</th><th class="num">Rush TD</th><th class="num">Rec</th><th class="num">Rec Yds</th><th class="num">Rec TD</th><th class="num">Tk</th><th class="num">TFL</th><th class="num">Sk</th><th class="num">Def INT</th></tr></thead><tbody>
+      ${rows.slice(0, 600).map(({ player, season }) => `<tr><td class="num">${season.year}</td><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${season.team}</td><td>${sizeLabel(player)}</td><td class="num">${season.ovr}</td><td class="num">${season.games}</td><td class="num">${season.passYds}</td><td class="num">${season.passTd}</td><td class="num">${season.int}</td><td class="num">${season.rushYds}</td><td class="num">${season.rushTd}</td><td class="num">${season.rec}</td><td class="num">${season.recYds}</td><td class="num">${season.recTd}</td><td class="num">${season.tackles}</td><td class="num">${season.tfl}</td><td class="num">${season.sacks}</td><td class="num">${season.defInt}</td></tr>`).join("")}
     </tbody></table></div>`;
   }
 
@@ -3190,10 +3320,10 @@
   }
 
   function renderProspectTable(prospects, pickInfo) {
-    return `<table><thead><tr><th class="num">Rank</th><th>Pos</th><th>Name</th><th>College</th><th class="num">Ovr</th><th class="num">Pot</th><th>Proj</th><th>Combine</th><th></th></tr></thead><tbody>
+    return `<table><thead><tr><th class="num">Rank</th><th>Pos</th><th>Name</th><th>College</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th>Proj</th><th>Combine</th><th></th></tr></thead><tbody>
       ${prospects.map(prospect => `<tr>
         <td class="num">${prospect.rank}</td><td>${prospect.pos}</td><td><button class="link-button" data-action="selectProspect" data-player="${prospect.id}">${playerName(prospect)}</button></td><td>${prospect.college}</td>
-        <td class="num">${scoutedValue(prospect, "ovr")}</td><td class="num">${scoutedValue(prospect, "pot")}</td><td>R${prospect.projectedRound}</td><td>${prospect.combine.forty}s / ${prospect.combine.bench} / ${prospect.combine.vert}"</td>
+        <td>${sizeLabel(prospect)}</td><td class="num">${scoutedValue(prospect, "ovr")}</td><td class="num">${scoutedValue(prospect, "pot")}</td><td>R${prospect.projectedRound}</td><td>${prospect.combine.forty}s / ${prospect.combine.bench} / ${prospect.combine.vert}"</td>
         <td>${state.phase === "draft" && pickInfo?.ownerTeam === USER_TEAM_ID ? `<button class="primary" data-action="draftProspect" data-player="${prospect.id}">Draft</button>` : ""}</td>
       </tr>`).join("")}
     </tbody></table>`;
@@ -3201,13 +3331,15 @@
 
   function renderProspectCard(prospect) {
     return `<div class="stack">
-      <div class="split"><div><strong>${playerName(prospect)}</strong><div class="muted">${prospect.pos} - ${prospect.college} - Age ${prospect.age}</div></div><span class="pill light">Proj R${prospect.projectedRound}</span></div>
+      <div class="split"><div><strong>${playerName(prospect)}</strong><div class="muted">${prospect.pos} - ${prospect.college} - Age ${prospect.age} - ${sizeLabel(prospect)}</div></div><span class="pill light">Proj R${prospect.projectedRound}</span></div>
       <div class="metric-row">
         <div class="metric"><label>Scouted OVR</label><strong>${scoutedValue(prospect, "ovr")}</strong><span>true accuracy: scouting</span></div>
         <div class="metric"><label>Scouted POT</label><strong>${scoutedValue(prospect, "pot")}</strong><span>${prospect.devTrait}</span></div>
+        <div class="metric"><label>Size</label><strong>${formatHeight(prospect.height)}</strong><span>${prospect.weight} lb</span></div>
         <div class="metric"><label>40</label><strong>${prospect.combine.forty}</strong><span>${prospect.combine.vert}" vert</span></div>
         <div class="metric"><label>Bench</label><strong>${prospect.combine.bench}</strong><span>college: ${prospect.collegeStats}</span></div>
       </div>
+      <div><strong>Awards</strong><div class="muted">${prospect.collegeAwards?.length ? prospect.collegeAwards.join(", ") : "None yet"}</div></div>
       <div><strong>Player Comp</strong><div class="muted">${prospect.comp}</div></div>
       <div class="table-wrap"><table><thead><tr><th>Attribute</th><th class="num">Grade</th><th>Attribute</th><th class="num">Grade</th></tr></thead><tbody>${renderProspectAttrs(prospect)}</tbody></table></div>
     </div>`;
@@ -3233,10 +3365,10 @@
     const players = state.freeAgents.slice().sort((a, b) => b.ovr - a.ovr).slice(0, 220);
     return `<div class="toolbar"><h2>Free Agency</h2><span class="pill light">Cap ${money(capSpace(USER_TEAM_ID))}</span><span class="pill light">Roster ${teamPlayers(USER_TEAM_ID).length}/53</span></div>
       ${renderRetirementPanel()}
-      <section class="panel"><div class="table-wrap"><table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Ask</th><th class="num">Cap After</th><th></th></tr></thead><tbody>
+      <section class="panel"><div class="table-wrap"><table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Ask</th><th class="num">Cap After</th><th></th></tr></thead><tbody>
       ${players.map(player => {
         const ask = estimatedAsk(player);
-        return `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td class="num">${money(ask)}</td><td class="num">${money(capSpace(USER_TEAM_ID) - ask)}</td><td><button data-action="signFA" data-player="${player.id}">Sign</button></td></tr>`;
+        return `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td class="num">${player.age}</td><td>${sizeLabel(player)}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td class="num">${money(ask)}</td><td class="num">${money(capSpace(USER_TEAM_ID) - ask)}</td><td><button data-action="signFA" data-player="${player.id}">Sign</button></td></tr>`;
       }).join("")}</tbody></table></div></section>`;
   }
 
@@ -3244,8 +3376,8 @@
     const team = getTeam(USER_TEAM_ID);
     const pending = (team.retiredPending || []).map(getPlayer).filter(Boolean);
     if (!pending.length) return "";
-    return `<section class="panel mb-12"><div class="panel-header"><h3>Retirement Decisions</h3></div><div class="table-wrap"><table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Ovr</th><th>Injuries</th><th></th></tr></thead><tbody>
-      ${pending.map(player => `<tr><td>${player.pos}</td><td>${playerName(player)}</td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td>${player.injury.history.length}</td><td><button data-action="convinceRetirement" data-player="${player.id}">Convince</button></td></tr>`).join("")}
+    return `<section class="panel mb-12"><div class="panel-header"><h3>Retirement Decisions</h3></div><div class="table-wrap"><table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th>Injuries</th><th></th></tr></thead><tbody>
+      ${pending.map(player => `<tr><td>${player.pos}</td><td>${playerName(player)}</td><td class="num">${player.age}</td><td>${sizeLabel(player)}</td><td class="num">${player.ovr}</td><td>${player.injury.history.length}</td><td><button data-action="convinceRetirement" data-player="${player.id}">Convince</button></td></tr>`).join("")}
     </tbody></table></div></section>`;
   }
 
@@ -3334,13 +3466,13 @@
 
   function renderCapPlanningPanel() {
     const players = teamPlayers(USER_TEAM_ID).filter(player => player.contract).sort((a, b) => capHit(b) - capHit(a)).slice(0, 28);
-    return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Cap Hit</th><th class="num">Release Dead</th><th class="num">Release Savings</th><th class="num">Post-June Now</th><th class="num">Post-June Next</th><th class="num">Trade Dead</th><th class="num">Trade Savings</th></tr></thead><tbody>
+    return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Cap Hit</th><th class="num">Release Dead</th><th class="num">Release Savings</th><th class="num">Post-June Now</th><th class="num">Post-June Next</th><th class="num">Trade Dead</th><th class="num">Trade Savings</th></tr></thead><tbody>
       ${players.map(player => {
         const hit = capHit(player);
         const releaseDead = deadCapIfRelease(player);
         const postJune = deadCapIfRelease(player, state.year, true);
         const tradeDead = deadCapIfTrade(player);
-        return `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${money(hit)}</td><td class="num">${money(releaseDead.current)}</td><td class="num ${hit - releaseDead.current >= 0 ? "good" : "bad"}">${money(hit - releaseDead.current)}</td><td class="num">${money(postJune.current)}</td><td class="num">${money(postJune.next)}</td><td class="num">${money(tradeDead)}</td><td class="num ${hit - tradeDead >= 0 ? "good" : "bad"}">${money(hit - tradeDead)}</td></tr>`;
+        return `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td class="num">${player.age}</td><td>${sizeLabel(player)}</td><td class="num">${player.ovr}</td><td class="num">${money(hit)}</td><td class="num">${money(releaseDead.current)}</td><td class="num ${hit - releaseDead.current >= 0 ? "good" : "bad"}">${money(hit - releaseDead.current)}</td><td class="num">${money(postJune.current)}</td><td class="num">${money(postJune.next)}</td><td class="num">${money(tradeDead)}</td><td class="num ${hit - tradeDead >= 0 ? "good" : "bad"}">${money(hit - tradeDead)}</td></tr>`;
       }).join("")}
     </tbody></table>`;
   }
@@ -3356,14 +3488,14 @@
         return ar - br || b.ovr - a.ovr;
       })
       .slice(0, 24);
-    return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Left</th><th class="num">Current Hit</th><th class="num">Projected AAV</th><th class="num">New Hit</th><th class="num">Cap After</th><th></th></tr></thead><tbody>
+    return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Left</th><th class="num">Current Hit</th><th class="num">Projected AAV</th><th class="num">New Hit</th><th class="num">Cap After</th><th></th></tr></thead><tbody>
       ${candidates.map(player => {
         const offer = extensionOffer(player);
         const oldHit = capHit(player);
         const newHit = contractYearHit(offer, 0);
         const after = capSpace(USER_TEAM_ID) + oldHit - newHit;
         const idx = currentYearIndex(player);
-        return `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td class="num">${player.age}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td class="num">${player.contract.years - idx}y</td><td class="num">${money(oldHit)}</td><td class="num">${money(contractAav(offer))}</td><td class="num">${money(newHit)}</td><td class="num ${after >= 0 ? "good" : "bad"}">${money(after)}</td><td><button data-action="extendPlayer" data-player="${player.id}" ${after < -1 ? "disabled" : ""}>Extend</button></td></tr>`;
+        return `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td class="num">${player.age}</td><td>${sizeLabel(player)}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td class="num">${player.contract.years - idx}y</td><td class="num">${money(oldHit)}</td><td class="num">${money(contractAav(offer))}</td><td class="num">${money(newHit)}</td><td class="num ${after >= 0 ? "good" : "bad"}">${money(after)}</td><td><button data-action="extendPlayer" data-player="${player.id}" ${after < -1 ? "disabled" : ""}>Extend</button></td></tr>`;
       }).join("")}
     </tbody></table>`;
   }
@@ -3502,7 +3634,7 @@
         ui.screen = "game";
         ui.tab = "dashboard";
         ui.profileOpen = false;
-        createNewLeague(leagueName);
+        createNewLeague(leagueName, ui.newLeagueMode);
         ui.newLeagueName = "";
         render();
         await save();
@@ -3592,7 +3724,7 @@
     } else if (action === "newLeague") {
       if (confirmAction("Start a separate clean league? Your current league will remain saved.")) {
         ui = { ...ui, tab: "dashboard", tradeMine: new Set(), tradeTheirs: new Set(), toast: "" };
-        createNewLeague(ui.newLeagueName.trim());
+        createNewLeague(ui.newLeagueName.trim(), ui.newLeagueMode);
         render();
         await save();
         render();
@@ -3617,6 +3749,7 @@
       ui.tradeTheirs.clear();
     }
     if (key === "newLeagueName") ui.newLeagueName = control.value;
+    if (key === "newLeagueMode") ui.newLeagueMode = control.value;
     if (key === "importText") ui.importText = control.value;
     save();
     render();
