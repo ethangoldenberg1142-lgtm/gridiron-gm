@@ -227,6 +227,7 @@
     tab: "dashboard",
     selectedPlayerId: null,
     profileOpen: false,
+    prospectProfileOpen: false,
     rosterPos: "ALL",
     playerSearch: "",
     playerSort: "ovr",
@@ -1151,7 +1152,7 @@
       ratings,
       combine: { forty: 4.67, bench: 18, vert: 35 },
       collegeStats: "4288 yds, 43 TD, 5 INT",
-      collegeAwards: ["1st Team All-Conference", "All-American", "Heisman finalist", "National QB of the Year"],
+      collegeAwards: ["Heisman winner", "1st Team All-Conference", "All-American", "National QB of the Year"],
       comp: "Andrew Luck / Peyton Manning",
       fixedComp: "Andrew Luck / Peyton Manning",
       rank: 0,
@@ -1451,7 +1452,7 @@
     state.updatedAt = Date.now();
     const packed = {
       state,
-      ui: { ...ui, screen: "game", tradeMine: Array.from(ui.tradeMine), tradeTheirs: Array.from(ui.tradeTheirs), toast: "", profileOpen: false }
+      ui: { ...ui, screen: "game", tradeMine: Array.from(ui.tradeMine), tradeTheirs: Array.from(ui.tradeTheirs), toast: "", profileOpen: false, prospectProfileOpen: false }
     };
     const meta = leagueMetaFromState();
     return saveLeaguePayload(state.leagueId, packed).then(() => {
@@ -1479,7 +1480,7 @@
       migratedState.leagueId ||= newLeagueId();
       migratedState.leagueName ||= "Migrated Detroit League";
       migratedState.updatedAt = Date.now();
-      const migratedUi = { ...ui, ...(packed.ui || {}), screen: "game", tradeMine: [], tradeTheirs: [], toast: "", profileOpen: false };
+      const migratedUi = { ...ui, ...(packed.ui || {}), screen: "game", tradeMine: [], tradeTheirs: [], toast: "", profileOpen: false, prospectProfileOpen: false };
       state = migratedState;
       migrateState();
       await saveLeaguePayload(migratedState.leagueId, { state: migratedState, ui: migratedUi });
@@ -1507,7 +1508,8 @@
         tradeMine: new Set(packed.ui?.tradeMine || []),
         tradeTheirs: new Set(packed.ui?.tradeTheirs || []),
         toast: "",
-        profileOpen: false
+        profileOpen: false,
+        prospectProfileOpen: false
       };
       migrateState();
       await save();
@@ -1540,6 +1542,7 @@
       ui.tradeMine = new Set();
       ui.tradeTheirs = new Set();
       ui.profileOpen = false;
+      ui.prospectProfileOpen = false;
       await save();
       ui.toast = "Imported league.";
       render();
@@ -3108,7 +3111,7 @@
           ${renderPhaseBanner()}
           ${renderTab()}
         </main>
-        ${renderPlayerModal()}
+        ${renderProfileModal()}
       </div>
     `;
   }
@@ -3151,7 +3154,17 @@
     `;
   }
 
-  function renderPlayerModal() {
+  function renderProfileModal() {
+    if (ui.prospectProfileOpen && ui.selectedProspectId) {
+      const prospect = getProspect(ui.selectedProspectId);
+      if (!prospect) return "";
+      return `<div class="modal-backdrop">
+        <section class="modal" data-modal="profile">
+          <div class="modal-header"><h3>${playerName(prospect)}</h3><span class="pill light">Draft Prospect</span><button data-action="closeProfile">Close</button></div>
+          <div class="modal-body">${renderProspectProfile(prospect)}</div>
+        </section>
+      </div>`;
+    }
     if (!ui.profileOpen || !ui.selectedPlayerId) return "";
     const player = getPlayer(ui.selectedPlayerId);
     if (!player) return "";
@@ -3628,6 +3641,44 @@
     </div>`;
   }
 
+  function renderProspectProfile(prospect) {
+    const scoutedOvr = scoutedValue(prospect, "ovr");
+    const scoutedPot = scoutedValue(prospect, "pot");
+    const scoutedTrait = scoutedDevTrait(prospect, scoutedOvr, scoutedPot);
+    return `<div class="stack">
+      <div class="split">
+        <div>
+          <strong>${prospect.pos} - ${prospect.college}</strong>
+          <div class="muted">${prospect.year} Draft Class - Age ${prospect.age} - ${sizeLabel(prospect)}</div>
+        </div>
+        <span class="pill light">#${prospect.rank} Board / ${prospect.projectedRound === 1 ? "Round 1" : `Round ${prospect.projectedRound}`}</span>
+      </div>
+      <div class="metric-row">
+        <div class="metric"><label>Scouted OVR</label><strong>${scoutedOvr}</strong><span>scouting-adjusted</span></div>
+        <div class="metric"><label>Scouted POT</label><strong>${scoutedPot}</strong><span>${scoutedTrait}</span></div>
+        <div class="metric"><label>Size</label><strong>${formatHeight(prospect.height)}</strong><span>${prospect.weight} lb</span></div>
+        <div class="metric"><label>Projection</label><strong>R${prospect.projectedRound}</strong><span>rank ${prospect.rank}</span></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric"><label>40 Yard</label><strong>${prospect.combine.forty}</strong><span>speed/acceleration signal</span></div>
+        <div class="metric"><label>Bench</label><strong>${prospect.combine.bench}</strong><span>strength signal</span></div>
+        <div class="metric"><label>Vertical</label><strong>${prospect.combine.vert}"</strong><span>explosiveness signal</span></div>
+        <div class="metric"><label>Player Comp</label><strong>${prospect.comp}</strong><span>archetype match</span></div>
+      </div>
+      <div class="grid two">
+        <section class="panel"><div class="panel-header"><h3>College Resume</h3></div><div class="panel-body stack">
+          <div><strong>Stats</strong><div class="muted">${prospect.collegeStats}</div></div>
+          <div><strong>Awards</strong><div class="muted">${prospect.collegeAwards?.length ? prospect.collegeAwards.join(", ") : "None yet"}</div></div>
+        </div></section>
+        <section class="panel"><div class="panel-header"><h3>Scouting Notes</h3></div><div class="panel-body stack">
+          <div><strong>Accuracy</strong><div class="muted">OVR/POT can be wrong depending on Detroit's scouting level and how far away the class is.</div></div>
+          <div><strong>Development</strong><div class="muted">Potential can change after entering the league based on age, coaching, injuries, performance, position, and luck.</div></div>
+        </div></section>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Attribute</th><th class="num">Grade</th><th>Attribute</th><th class="num">Grade</th></tr></thead><tbody>${renderProspectAttrs(prospect)}</tbody></table></div>
+    </div>`;
+  }
+
   function renderProspectAttrs(prospect) {
     const attrs = ["spd", "str", "agi", "acc", "awr", "inj", "thp", "tha", "cth", "rr", "car", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
     const rows = [];
@@ -3931,6 +3982,7 @@
     }
     if (event.target.classList?.contains("modal-backdrop")) {
       ui.profileOpen = false;
+      ui.prospectProfileOpen = false;
       render();
       return;
     }
@@ -3956,6 +4008,7 @@
         ui.screen = "game";
         ui.tab = "dashboard";
         ui.profileOpen = false;
+        ui.prospectProfileOpen = false;
         createNewLeague(leagueName, ui.newLeagueMode);
         ui.newLeagueName = "";
         render();
@@ -3981,9 +4034,11 @@
     else if (action === "selectPlayer") {
       ui.selectedPlayerId = target.dataset.player;
       ui.profileOpen = true;
+      ui.prospectProfileOpen = false;
       render();
     } else if (action === "closeProfile") {
       ui.profileOpen = false;
+      ui.prospectProfileOpen = false;
       render();
     } else if (action === "selectPlayerTab") {
       ui.selectedPlayerId = target.dataset.player;
@@ -4002,6 +4057,8 @@
       render();
     } else if (action === "selectProspect") {
       ui.selectedProspectId = target.dataset.player;
+      ui.prospectProfileOpen = true;
+      ui.profileOpen = false;
       render();
     } else if (action === "draftProspect") userDraftProspect(target.dataset.player);
     else if (action === "simPick") {
