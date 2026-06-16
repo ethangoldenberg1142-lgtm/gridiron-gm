@@ -9,7 +9,7 @@
   const CURRENT_YEAR = 2026;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
-  const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v3";
+  const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v4";
 
   const ALL_ATTRS = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
   const POSITIONS = ["QB", "RB", "WR", "TE", "T", "OG", "C", "DE", "DT", "LB", "CB", "S", "K", "P"];
@@ -650,6 +650,7 @@
       }
       generateFreeAgents(170);
       ensureFutureDraftClasses(CURRENT_YEAR + 1);
+      if (mode === "standard") applyStandardDraftStorylines();
       state.schedule = buildSeasonSchedule();
       resetSeasonStats();
       addNews("League created", `${mode === "standard" ? "Standard" : "Randomized"} roster set loaded. Offseason training, free agency, and roster setup are complete. Week 1 is ready.`);
@@ -724,9 +725,12 @@
     const firstName = pick(FIRST_NAMES);
     const lastName = pick(LAST_NAMES);
     const base = rookieProfile ? rookieProfile.ovr : generateOverall(pos, starterLine, teamQuality, age, slotIndex);
-    const pot = rookieProfile ? rookieProfile.pot : generatePotential(base, age);
-    const devTrait = rookieProfile ? rookieProfile.devTrait : devTraitFor(base, pot);
+    let pot = rookieProfile ? rookieProfile.pot : generatePotential(base, age);
+    pot = Math.max(base, pot);
     const ratings = makeRatingsForPosition(pos, base, pot);
+    pot = Math.max(pot, ratings.ovr);
+    ratings.pot = pot;
+    const devTrait = rookieProfile ? rookieProfile.devTrait : devTraitFor(ratings.ovr, pot);
     const contract = rookieProfile ? makeRookieContract(rookieProfile.round, rookieProfile.pickInRound, pos, base) : makeContract(pos, base, pot, age);
     const body = rookieProfile?.height && rookieProfile?.weight ? { height: rookieProfile.height, weight: rookieProfile.weight } : makeBody(pos);
     const hidden = {
@@ -1091,12 +1095,77 @@
     }
     players.sort((a, b) => prospectGrade(b) - prospectGrade(a));
     assignDraftClassColleges(players);
+    rankDraftClass(players);
+    return players;
+  }
+
+  function applyStandardDraftStorylines() {
+    const year = 2027;
+    const draftClass = state.draftClasses[String(year)];
+    if (!draftClass) return;
+    const prospect = makeStandardMichiganQuarterback(year);
+    const existingIndex = draftClass.findIndex(item => item.pos === "QB" && item.college === "Michigan");
+    const replaceIndex = existingIndex >= 0 ? existingIndex : lowestRatedProspectIndex(draftClass, "QB");
+    draftClass[replaceIndex >= 0 ? replaceIndex : draftClass.length - 1] = prospect;
+    rankDraftClass(draftClass);
+  }
+
+  function lowestRatedProspectIndex(draftClass, pos) {
+    return draftClass
+      .map((prospect, index) => ({ prospect, index }))
+      .filter(item => !pos || item.prospect.pos === pos)
+      .sort((a, b) => prospectGrade(a.prospect) - prospectGrade(b.prospect))[0]?.index ?? -1;
+  }
+
+  function makeStandardMichiganQuarterback(year) {
+    const ratings = makeRatingsForPosition("QB", 85, 99);
+    Object.assign(ratings, {
+      spd: 76,
+      str: 70,
+      agi: 72,
+      acc: 73,
+      awr: 84,
+      inj: 92,
+      sta: 92,
+      tgh: 88,
+      thp: 88,
+      tha: 87
+    });
+    ratings.ovr = computeOverall("QB", ratings);
+    ratings.pot = 99;
+    return {
+      id: `d${year}-michigan-generational-qb`,
+      firstName: "Andrew",
+      lastName: "Whitmore",
+      pos: "QB",
+      height: 76,
+      weight: 232,
+      age: 21,
+      college: "Michigan",
+      year,
+      trueOvr: ratings.ovr,
+      truePot: 99,
+      pot: 99,
+      devTrait: "Generational",
+      bustGem: 2.35,
+      ratings,
+      combine: { forty: 4.67, bench: 18, vert: 35 },
+      collegeStats: "4288 yds, 43 TD, 5 INT",
+      collegeAwards: ["1st Team All-Conference", "All-American", "Heisman finalist", "National QB of the Year"],
+      comp: "Andrew Luck / Peyton Manning",
+      fixedComp: "Andrew Luck / Peyton Manning",
+      rank: 0,
+      projectedRound: 1
+    };
+  }
+
+  function rankDraftClass(players) {
+    players.sort((a, b) => prospectGrade(b) - prospectGrade(a));
     players.forEach((prospect, index) => {
       prospect.rank = index + 1;
       prospect.projectedRound = clamp(Math.ceil((index + 1) / 32), 1, 7);
-      prospect.comp = makePlayerComp(prospect);
+      prospect.comp = prospect.fixedComp || makePlayerComp(prospect);
     });
-    return players;
   }
 
   function collegePositionLimit(pos, rankIndex) {
@@ -1517,8 +1586,7 @@
     for (const player of state.players.concat(state.freeAgents)) {
       player.ratings = normalizeRatingsForPosition(player.pos, player.ratings, player.ovr || player.ratings?.ovr || 60);
       player.ovr = player.ratings.ovr;
-      player.pot = Math.max(player.pot || player.ovr, player.ovr);
-      player.truePot = Math.max(player.truePot || player.pot, player.ovr);
+      syncPlayerPotential(player);
       ensureBodyFields(player);
       ensureDevelopmentFields(player);
       player.injury ||= { status: "Healthy", weeks: 0, history: [], prone: 0.08 };
@@ -1536,7 +1604,7 @@
     for (const player of state.retiredPlayers || []) {
       player.ratings = normalizeRatingsForPosition(player.pos, player.ratings, player.ovr || player.ratings?.ovr || 60);
       player.ovr = player.ratings.ovr;
-      player.pot = Math.max(player.pot || player.ovr, player.ovr);
+      syncPlayerPotential(player);
       ensureBodyFields(player);
       ensureDevelopmentFields(player);
     }
@@ -2174,6 +2242,7 @@
         const declineChance = clamp((ageGap + 2) * 0.009 + injuryWeeks * 0.0009 + Math.max(0, player.ovr - player.truePot) * 0.003 - production * 0.0006, 0, 0.11);
         if (chance(growthChance)) adjustPlayer(player, rand(0.03, 0.18) + production * 0.003);
         else if (chance(declineChance)) adjustPlayer(player, -rand(0.03, 0.16));
+        applyPotentialDelta(player, potentialDevelopmentDelta(player, team, false));
       }
     }
   }
@@ -2223,8 +2292,51 @@
       }
     }
     updateOverall(player);
-    if (player.ovr > player.pot) player.pot = player.ovr;
-    if (player.ovr > player.truePot) player.truePot = player.ovr;
+    syncPlayerPotential(player);
+  }
+
+  function syncPlayerPotential(player) {
+    const current = typeof player.truePot === "number" ? player.truePot : (typeof player.pot === "number" ? player.pot : player.ovr);
+    const pot = Math.round(clamp(current, player.ovr, 99));
+    player.truePot = pot;
+    player.pot = pot;
+    if (player.ratings) player.ratings.pot = pot;
+    player.devTrait = devTraitFor(player.ovr, player.pot);
+  }
+
+  function potentialDevelopmentDelta(player, team, offseason = false) {
+    const profile = agingProfile(player.pos);
+    const performance = weeklyProductionScore(player);
+    const ageGap = player.age - (player.regressionAge || REGRESSION_AGES[player.pos]);
+    const growthWindow = clamp(((player.regressionAge || REGRESSION_AGES[player.pos]) - player.age + 2) / 10, -0.45, 1.25);
+    const workEthic = player.hidden?.workEthic ?? 0.55;
+    const bustGem = player.hidden?.bustGem ?? 0;
+    const injuryWeeks = recentInjuryWeeks(player, 2);
+    const majorInjuries = recentMajorInjuries(player, 3);
+    const coaching = (team.facilities.coaching || 5) - 5;
+    const underCeiling = clamp((player.truePot - player.ovr) / 16, -1, 1.5);
+    const lateCareer = clamp((ageGap + profile.warningYears) / profile.declineSpan, 0, 1.8);
+    const performanceSignal = clamp(performance * 0.05, -0.75, 1.1);
+    const growthMean = growthWindow * 0.42 + underCeiling * 0.16 + performanceSignal + coaching * 0.055 + (workEthic - 0.5) * 0.72 + bustGem * 0.36;
+    const declineMean = lateCareer * (0.48 + Math.max(0, player.ovr - 72) * 0.014) + injuryWeeks * 0.04 + majorInjuries * 0.38 + Math.max(0, 68 - (player.ratings.inj || 68)) * 0.012;
+    const scale = offseason ? 1 : 0.13;
+    const volatility = (offseason ? 0.72 : 0.22) + profile.volatility * (offseason ? 0.22 : 0.05) + majorInjuries * 0.05 + Math.max(0, Math.abs(bustGem) - 0.7) * 0.08;
+    return clamp(gaussian((growthMean - declineMean) * scale, volatility), offseason ? -4.5 : -1.1, offseason ? 3.6 : 1);
+  }
+
+  function applyPotentialDelta(player, delta) {
+    const magnitude = Math.abs(delta);
+    if (magnitude < 0.25 && !chance(magnitude)) return;
+    let steps = Math.floor(magnitude);
+    if (chance(magnitude - steps)) steps += 1;
+    if (!steps) return;
+    const current = typeof player.truePot === "number" ? player.truePot : player.pot;
+    const next = Math.round(clamp(current + steps * Math.sign(delta), player.ovr, 99));
+    if (next === current) return;
+    player.truePot = next;
+    player.pot = next;
+    if (player.ratings) player.ratings.pot = next;
+    player.devTrait = devTraitFor(player.ovr, player.pot);
   }
 
   function collectWeeklyFinance() {
@@ -2425,9 +2537,10 @@
     for (const team of state.teams) {
       for (const player of teamPlayers(team.id)) {
         applyDevelopmentDelta(player, developmentDelta(player, team));
+        applyPotentialDelta(player, potentialDevelopmentDelta(player, team, true));
         player.age += 1;
         player.yearsPro += 1;
-        player.stats.history.push({ year: state.year, ...player.stats.season, ovr: player.ovr, team: getTeam(player.teamId)?.abbr || "FA" });
+        player.stats.history.push({ year: state.year, ...player.stats.season, ovr: player.ovr, pot: player.pot, team: getTeam(player.teamId)?.abbr || "FA" });
         player.stats.history = player.stats.history.slice(-18);
       }
     }
@@ -2765,6 +2878,24 @@
     return null;
   }
 
+  function pickAssetId(holderTeamId, pickAsset) {
+    return `pick:${holderTeamId}:${pickAsset.year}:${pickAsset.round}:${pickAsset.originalTeam}`;
+  }
+
+  function findPickAsset(asset) {
+    const holder = getTeam(asset.teamId);
+    return holder?.draftPicks.find(item => item.year === asset.year && item.round === asset.round && item.originalTeam === asset.originalTeam) || null;
+  }
+
+  function pickInRound(pickAsset) {
+    return pickAsset.overall ? ((pickAsset.overall - 1) % 32) + 1 : null;
+  }
+
+  function pickSlotLabel(pickAsset) {
+    const pickNumber = pickInRound(pickAsset);
+    return pickNumber ? `R${pickAsset.round}.${pickNumber}` : `R${pickAsset.round}, pick TBD`;
+  }
+
   function assetLabel(assetId) {
     const asset = parseAsset(assetId);
     if (!asset) return "";
@@ -2772,8 +2903,9 @@
       const player = getPlayer(asset.playerId);
       return player ? `${player.pos} ${playerName(player)} (${player.ovr}/${player.pot})` : "Player";
     }
+    const pickAsset = findPickAsset(asset) || asset;
     const team = getTeam(asset.originalTeam);
-    return `${asset.year} R${asset.round} (${team?.abbr || asset.originalTeam})`;
+    return `${asset.year} ${pickSlotLabel(pickAsset)} (${team?.abbr || asset.originalTeam})`;
   }
 
   function assetValue(assetId) {
@@ -2783,8 +2915,7 @@
       const player = getPlayer(asset.playerId);
       return player ? playerTradeValue(player) : 0;
     }
-    const holder = getTeam(asset.teamId);
-    const pickAsset = holder?.draftPicks.find(item => item.year === asset.year && item.round === asset.round && item.originalTeam === asset.originalTeam);
+    const pickAsset = findPickAsset(asset);
     return pickAsset ? pickValue(pickAsset) : 0;
   }
 
@@ -2939,6 +3070,13 @@
     const noise = (10 - team.facilities.scouting) * 1.05 + yearsAway * 3.5;
     const trueValue = field === "ovr" ? prospect.trueOvr : prospect.truePot;
     return Math.round(clamp(trueValue + seededGaussian(`${prospect.id}:${field}:${team.facilities.scouting}:${state.year}`, 0, noise), 30, 99));
+  }
+
+  function scoutedDevTrait(prospect, ovr = scoutedValue(prospect, "ovr"), pot = scoutedValue(prospect, "pot")) {
+    if (pot >= 95 && ovr >= 78) return "Generational";
+    if ((pot >= 91 && ovr >= 75) || ovr >= 90) return "Superstar";
+    if ((pot >= 84 && ovr >= 70) || ovr >= 83) return "Star";
+    return "Normal";
   }
 
   function render() {
@@ -3472,11 +3610,14 @@
   }
 
   function renderProspectCard(prospect) {
+    const scoutedOvr = scoutedValue(prospect, "ovr");
+    const scoutedPot = scoutedValue(prospect, "pot");
+    const scoutedTrait = scoutedDevTrait(prospect, scoutedOvr, scoutedPot);
     return `<div class="stack">
       <div class="split"><div><strong>${playerName(prospect)}</strong><div class="muted">${prospect.pos} - ${prospect.college} - Age ${prospect.age} - ${sizeLabel(prospect)}</div></div><span class="pill light">Proj R${prospect.projectedRound}</span></div>
       <div class="metric-row">
-        <div class="metric"><label>Scouted OVR</label><strong>${scoutedValue(prospect, "ovr")}</strong><span>true accuracy: scouting</span></div>
-        <div class="metric"><label>Scouted POT</label><strong>${scoutedValue(prospect, "pot")}</strong><span>${prospect.devTrait}</span></div>
+        <div class="metric"><label>Scouted OVR</label><strong>${scoutedOvr}</strong><span>true accuracy: scouting</span></div>
+        <div class="metric"><label>Scouted POT</label><strong>${scoutedPot}</strong><span>${scoutedTrait}</span></div>
         <div class="metric"><label>Size</label><strong>${formatHeight(prospect.height)}</strong><span>${prospect.weight} lb</span></div>
         <div class="metric"><label>40</label><strong>${prospect.combine.forty}</strong><span>${prospect.combine.vert}" vert</span></div>
         <div class="metric"><label>Bench</label><strong>${prospect.combine.bench}</strong><span>college: ${prospect.collegeStats}</span></div>
@@ -3553,18 +3694,57 @@
 
   function renderAssetPanel(teamId, selectedSet, title, side) {
     const team = getTeam(teamId);
-    const playerAssets = teamPlayers(teamId).sort((a, b) => b.ovr - a.ovr).map(player => `player:${player.id}`);
-    const pickAssets = team.draftPicks.filter(pickItem => pickItem.year <= state.year + 3).sort((a, b) => a.year - b.year || a.round - b.round).map(pickItem => `pick:${team.id}:${pickItem.year}:${pickItem.round}:${pickItem.originalTeam}`);
-    const assets = playerAssets.concat(pickAssets);
+    const players = teamPlayers(teamId).sort((a, b) => b.ovr - a.ovr || POSITION_VALUE[b.pos] - POSITION_VALUE[a.pos]);
+    const picks = team.draftPicks
+      .filter(pickItem => pickItem.year >= state.year + 1 && pickItem.year <= state.year + 3)
+      .sort((a, b) => a.year - b.year || a.round - b.round || (a.overall || 999) - (b.overall || 999) || a.originalTeam.localeCompare(b.originalTeam));
     return `<section class="panel">
       <div class="panel-header"><h3>${title}</h3><span class="spacer muted">${selectedSet.size} selected</span></div>
-      <div class="asset-list">${assets.map(assetId => {
-        const asset = parseAsset(assetId);
-        const player = asset.type === "player" ? getPlayer(asset.playerId) : null;
-        const disabled = asset.type === "player" && tradeDeadlinePassed() ? "disabled" : "";
-        return `<label class="asset-row"><input type="checkbox" data-action="toggleAsset" data-side="${side}" data-asset="${assetId}" ${selectedSet.has(assetId) ? "checked" : ""} ${disabled}><span>${assetLabel(assetId)} ${player ? `<span class="muted">- ${contractSummary(player)}</span>` : ""}</span><b>${assetValue(assetId)}</b></label>`;
-      }).join("")}</div>
+      <div class="trade-assets">
+        <div class="asset-section-title"><strong>Roster</strong><span>${players.length} players</span></div>
+        <div class="table-wrap asset-table-wrap">${renderTradeRosterAssets(players, selectedSet, side)}</div>
+        <div class="asset-section-title"><strong>Draft Picks</strong><span>${picks.length} picks</span></div>
+        <div class="table-wrap asset-table-wrap">${renderTradePickAssets(team, picks, selectedSet, side)}</div>
+      </div>
     </section>`;
+  }
+
+  function renderTradeRosterAssets(players, selectedSet, side) {
+    return `<table class="asset-table"><thead><tr><th></th><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Cap</th><th class="num">Value</th></tr></thead><tbody>
+      ${players.map(player => {
+        const assetId = `player:${player.id}`;
+        const disabled = tradeDeadlinePassed() ? "disabled" : "";
+        return `<tr>
+          <td><input type="checkbox" data-action="toggleAsset" data-side="${side}" data-asset="${assetId}" ${selectedSet.has(assetId) ? "checked" : ""} ${disabled}></td>
+          <td>${player.pos}</td>
+          <td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button><div class="muted">${contractSummary(player)}</div></td>
+          <td class="num">${player.age}</td>
+          <td>${sizeLabel(player)}</td>
+          <td class="num">${player.ovr}</td>
+          <td class="num">${player.pot}</td>
+          <td class="num">${money(capHit(player))}</td>
+          <td class="num">${playerTradeValue(player)}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>`;
+  }
+
+  function renderTradePickAssets(team, picks, selectedSet, side) {
+    return `<table class="asset-table"><thead><tr><th></th><th class="num">Year</th><th>Round</th><th>Pick</th><th>Original Team</th><th class="num">Value</th></tr></thead><tbody>
+      ${picks.map(pickItem => {
+        const assetId = pickAssetId(team.id, pickItem);
+        const pickNumber = pickInRound(pickItem);
+        const original = getTeam(pickItem.originalTeam);
+        return `<tr>
+          <td><input type="checkbox" data-action="toggleAsset" data-side="${side}" data-asset="${assetId}" ${selectedSet.has(assetId) ? "checked" : ""}></td>
+          <td class="num">${pickItem.year}</td>
+          <td>Round ${pickItem.round}</td>
+          <td>${pickNumber ? `${pickItem.round}.${pickNumber}` : "TBD"}</td>
+          <td>${original ? `${original.abbr} (${teamName(original)})` : pickItem.originalTeam}</td>
+          <td class="num">${pickValue(pickItem)}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>`;
   }
 
   function renderFinance() {
