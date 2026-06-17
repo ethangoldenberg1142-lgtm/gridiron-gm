@@ -8,12 +8,34 @@
   const DB_NAME = "gridiron-gm-db-v1";
   const DB_STORE = "leagues";
   const CURRENT_YEAR = 2026;
+  const NFL_START_YEAR = 2025;
+  const NFL_2025_CAP = 279.2;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
   const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v4";
+  const NFL_LEAGUE_SEED = "gridiron-nfl-2025-v1";
 
   const ALL_ATTRS = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
   const POSITIONS = ["QB", "RB", "WR", "TE", "T", "OG", "C", "DE", "DT", "LB", "CB", "S", "K", "P"];
+  const DRAFT_CLASS_SIZE = 300;
+  const DRAFT_SELECTIONS = 224;
+  const NFL_TEAM_LABEL_TO_ID = {
+    "Arizona Cardinals": "ARI", "Atlanta Falcons": "ATL", "Baltimore Ravens": "BAL", "Buffalo Bills": "BUF",
+    "Carolina Panthers": "CAR", "Chicago Bears": "CHI", "Cincinnati Bengals": "CIN", "Cleveland Browns": "CLE",
+    "Dallas Cowboys": "DAL", "Denver Broncos": "DEN", "Detroit Lions": "DET", "Green Bay Packers": "GB",
+    "Houston Texans": "HOU", "Indianapolis Colts": "IND", "Jacksonville Jaguars": "JAX", "Kansas City Chiefs": "KC",
+    "Las Vegas Raiders": "LV", "Los Angeles Chargers": "LAC", "Los Angeles Rams": "LAR", "Miami Dolphins": "MIA",
+    "Minnesota Vikings": "MIN", "NY Giants": "NYG", "New York Giants": "NYG", "NY Jets": "NYJ", "New York Jets": "NYJ",
+    "New England Patriots": "NE", "New Orleans Saints": "NO", "Philadelphia Eagles": "PHI", "Pittsburgh Steelers": "PIT",
+    "San Francisco 49ers": "SF", "Seattle Seahawks": "SEA", "Tampa Bay Buccaneers": "TB", "Tennessee Titans": "TEN",
+    "Washington Commanders": "WAS"
+  };
+  const NFL_POSITION_MAP = {
+    HB: "RB", FB: "RB", OT: "T", LT: "T", RT: "T", G: "OG", LG: "OG", RG: "OG", LS: "C",
+    EDGE: "DE", ED: "DE", LEDG: "DE", REDG: "DE", DI: "DT", IDL: "DT", DL: "DT",
+    MLB: "LB", OLB: "LB", ROLB: "LB", LOLB: "LB", MIKE: "LB", SAM: "LB", WILL: "LB",
+    FS: "S", SS: "S", PK: "K"
+  };
   const DEPTH_NEEDS = { QB: 2, RB: 3, WR: 5, TE: 2, T: 3, OG: 3, C: 2, DE: 3, DT: 3, LB: 4, CB: 4, S: 3, K: 1, P: 1 };
   const ROSTER_PLAN = { QB: 3, RB: 4, WR: 7, TE: 3, T: 4, OG: 4, C: 2, DE: 4, DT: 4, LB: 6, CB: 6, S: 4, K: 1, P: 1 };
   const POSITION_VALUE = { QB: 1.95, RB: 0.78, WR: 1.2, TE: 0.82, T: 1.18, OG: 0.76, C: 0.72, DE: 1.28, DT: 1.04, LB: 0.92, CB: 1.18, S: 0.82, K: 0.18, P: 0.13 };
@@ -261,6 +283,7 @@
     toast: "",
     newLeagueName: "",
     newLeagueMode: "standard",
+    newLeagueNflSetup: "real",
     importText: "",
     discreteMode: loadDiscreteModePreference()
   };
@@ -530,6 +553,7 @@
   }
 
   function salaryCap(year = state.year) {
+    if (year === NFL_START_YEAR) return NFL_2025_CAP;
     return round(BASE_CAP * (1.055 ** (year - CURRENT_YEAR)), 1);
   }
 
@@ -633,14 +657,17 @@
     }
   }
 
-  function createNewLeague(name = "", mode = "standard") {
+  function createNewLeague(name = "", mode = "standard", options = {}) {
     const build = () => {
+      const nflSetup = options.nflSetup || ui.newLeagueNflSetup || "real";
+      const isNflMode = mode === "nfl";
+      const startYear = isNflMode ? NFL_START_YEAR : CURRENT_YEAR;
       state = {
         version: 1,
         leagueId: newLeagueId(),
-        leagueName: name || `Detroit Rebuild ${new Date().toLocaleDateString()}`,
-        leagueMode: mode,
-        year: CURRENT_YEAR,
+        leagueName: name || (isNflMode ? `NFL 2025 Wolverines ${new Date().toLocaleDateString()}` : `Detroit Rebuild ${new Date().toLocaleDateString()}`),
+        leagueMode: isNflMode ? `nfl-${nflSetup}` : mode,
+        year: startYear,
         phase: "regular",
         week: 1,
         playoffRound: "",
@@ -662,19 +689,30 @@
       };
 
       state.teams = TEAM_DEFS.map((teamDef, index) => makeTeam(teamDef, index));
-      for (const team of state.teams) {
-        generateRoster(team);
-        buildDepthChart(team.id);
-        assignStarterContracts(team.id);
+      if (isNflMode) {
+        loadNflModePlayers(nflSetup);
+      } else {
+        for (const team of state.teams) {
+          generateRoster(team);
+          buildDepthChart(team.id);
+          assignStarterContracts(team.id);
+        }
+        generateFreeAgents(170);
       }
-      generateFreeAgents(170);
-      ensureFutureDraftClasses(CURRENT_YEAR + 1);
-      if (mode === "standard") applyStandardDraftStorylines();
+      ensureFutureDraftClasses(state.year + 1);
+      if (isNflMode) applyNflDraftClasses();
+      else if (mode === "standard") applyStandardDraftStorylines();
       state.schedule = buildSeasonSchedule();
       resetSeasonStats();
-      addNews("League created", `${mode === "standard" ? "Standard" : "Randomized"} roster set loaded. Offseason training, free agency, and roster setup are complete. Week 1 is ready.`);
+      ui.draftYear = state.year + 1;
+      ui.scheduleWeek = 1;
+      const createdBody = isNflMode && nflSetup === "draft"
+        ? "NFL league draft pool loaded. Detroit picks its players while the other teams draft by AI."
+        : `${leagueModeLabel(mode, nflSetup)} loaded. Offseason training, free agency, and roster setup are complete. Week 1 is ready.`;
+      addNews("League created", createdBody);
     };
     if (mode === "standard") return withRandomSeed(STANDARD_LEAGUE_SEED, build);
+    if (mode === "nfl") return withRandomSeed(`${NFL_LEAGUE_SEED}:${options.nflSetup || ui.newLeagueNflSetup || "real"}`, build);
     return build();
   }
 
@@ -719,7 +757,8 @@
 
   function createDefaultPicks(teamId) {
     const picks = [];
-    for (let year = CURRENT_YEAR + 1; year <= CURRENT_YEAR + 3; year += 1) {
+    const startYear = state?.year || CURRENT_YEAR;
+    for (let year = startYear + 1; year <= startYear + 3; year += 1) {
       for (let roundValue = 1; roundValue <= 7; roundValue += 1) {
         picks.push({ year, round: roundValue, originalTeam: teamId, ownerTeam: teamId, overall: null });
       }
@@ -1052,8 +1091,363 @@
     }
   }
 
+  function leagueModeLabel(mode, nflSetup = "real") {
+    if (mode === "nfl") return nflSetup === "draft" ? "NFL 2025 league draft" : "NFL 2025 current-team roster";
+    return mode === "standard" ? "Standard roster set" : "Randomized roster set";
+  }
+
+  function nflModeData() {
+    return window.NFL_MODE_DATA || null;
+  }
+
+  function mapNflTeam(teamLabel) {
+    return NFL_TEAM_LABEL_TO_ID[teamLabel] || null;
+  }
+
+  function mapNflPosition(position) {
+    const key = String(position || "").toUpperCase();
+    return POSITIONS.includes(key) ? key : (NFL_POSITION_MAP[key] || "LB");
+  }
+
+  function maddenStat(stats, key, fallback = 50) {
+    const value = stats?.[key];
+    return Number.isFinite(value) ? Number(value) : fallback;
+  }
+
+  function maddenAverage(stats, keys, fallback = 50) {
+    const values = keys.map(key => maddenStat(stats, key, null)).filter(value => Number.isFinite(value) && value > 0);
+    if (!values.length) return fallback;
+    return round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  }
+
+  function maddenRatingsForPosition(source, pos, pot) {
+    const stats = source.stats || {};
+    const fallback = attr => generatedAttr(pos, attr, source.ovr || 60);
+    const ratings = {
+      spd: maddenStat(stats, "speed", fallback("spd")),
+      str: maddenStat(stats, "strength", fallback("str")),
+      agi: maddenAverage(stats, ["agility", "changeOfDirection"], fallback("agi")),
+      acc: maddenStat(stats, "acceleration", fallback("acc")),
+      awr: maddenAverage(stats, ["awareness", "playRecognition"], fallback("awr")),
+      inj: maddenStat(stats, "injury", fallback("inj")),
+      sta: maddenStat(stats, "stamina", fallback("sta")),
+      tgh: maddenStat(stats, "toughness", fallback("tgh")),
+      thp: maddenStat(stats, "throwPower", fallback("thp")),
+      tha: maddenAverage(stats, ["throwAccuracyShort", "throwAccuracyMid", "throwAccuracyDeep", "throwOnTheRun", "throwUnderPressure"], fallback("tha")),
+      cth: maddenAverage(stats, ["catching", "catchInTraffic", "spectacularCatch"], fallback("cth")),
+      rr: maddenAverage(stats, ["shortRouteRunning", "mediumRouteRunning", "deepRouteRunning", "release"], fallback("rr")),
+      car: maddenAverage(stats, ["carrying", "bCVision"], fallback("car")),
+      trk: maddenAverage(stats, ["trucking", "breakTackle", "stiffArm"], fallback("trk")),
+      pbk: maddenAverage(stats, ["passBlock", "passBlockPower", "passBlockFinesse"], fallback("pbk")),
+      rbk: maddenAverage(stats, ["runBlock", "runBlockPower", "runBlockFinesse", "impactBlocking", "leadBlock"], fallback("rbk")),
+      bshed: maddenAverage(stats, ["blockShedding", "pursuit", "playRecognition"], fallback("bshed")),
+      pmv: maddenStat(stats, "powerMoves", fallback("pmv")),
+      fmv: maddenStat(stats, "finesseMoves", fallback("fmv")),
+      tak: maddenAverage(stats, ["tackle", "hitPower", "pursuit"], fallback("tak")),
+      man: maddenStat(stats, "manCoverage", fallback("man")),
+      zon: maddenStat(stats, "zoneCoverage", fallback("zon")),
+      prs: maddenStat(stats, "press", fallback("prs")),
+      kpw: maddenStat(stats, "kickPower", fallback("kpw")),
+      kac: maddenStat(stats, "kickAccuracy", fallback("kac")),
+      ovr: clamp(source.ovr || maddenStat(stats, "overall", computeOverall(pos, stats)), 35, 99),
+      pot
+    };
+    for (const attr of ALL_ATTRS) ratings[attr] = Math.round(clamp(ratings[attr], 1, 99));
+    return ratings;
+  }
+
+  function nflDevTrait(source, ovr, pot) {
+    const abilityTypes = (source.abilities || []).map(ability => String(ability.type || "").toLowerCase());
+    const hasXFactor = abilityTypes.some(type => type.includes("xfactor") || type.includes("x-factor"));
+    const hasSuperstar = hasXFactor || abilityTypes.some(type => type.includes("superstar"));
+    if (hasXFactor && ovr >= 97 && source.age <= 25) return "Generational";
+    if (hasXFactor || ovr >= 94 || pot >= 95) return "Superstar";
+    if (hasSuperstar || ovr >= 86 || pot >= 88) return "Star";
+    return "Normal";
+  }
+
+  function nflPotential(source, pos) {
+    const ovr = clamp(source.ovr || 60, 35, 99);
+    const age = source.age || 25;
+    const abilityTypes = (source.abilities || []).map(ability => String(ability.type || "").toLowerCase());
+    const abilityBoost = abilityTypes.some(type => type.includes("xfactor") || type.includes("x-factor")) ? 4 : abilityTypes.some(type => type.includes("superstar")) ? 2 : 0;
+    let ageGap = age <= 22 ? 8 : age <= 25 ? 5 : age <= 28 ? 2 : age <= REGRESSION_AGES[pos] ? 0 : -3;
+    if (source.yearsPro <= 1) ageGap += 2;
+    const raw = ovr + ageGap + abilityBoost + gaussian(0, age <= 25 ? 2.8 : 2.2);
+    const floor = age >= REGRESSION_AGES[pos] + 2 ? ovr - 6 : ovr;
+    return Math.round(clamp(raw, floor, 99));
+  }
+
+  function nflInjuryProne(pos, injuryRating) {
+    const positional = { RB: 0.045, WR: 0.025, TE: 0.025, DE: 0.022, DT: 0.025, LB: 0.028, CB: 0.024, S: 0.024 }[pos] || 0.012;
+    return clamp(0.035 + positional + Math.max(0, 90 - injuryRating) * 0.0045, 0.02, 0.3);
+  }
+
+  function makeNflPlayer(source, teamId = null) {
+    const pos = mapNflPosition(source.pos);
+    const ovr = clamp(source.ovr || 60, 35, 99);
+    const pot = nflPotential(source, pos);
+    const ratings = maddenRatingsForPosition(source, pos, pot);
+    ratings.ovr = ovr;
+    const hidden = {
+      bustGem: gaussian(0, 0.32),
+      workEthic: clamp(0.5 + Math.max(0, pot - ovr) * 0.018 + gaussian(0, 0.13), 0.1, 0.98),
+      longevity: clamp((ratings.inj || 75) / 110 + gaussian(0, 0.1), 0.05, 0.98)
+    };
+    const body = source.height && source.weight ? { height: source.height, weight: source.weight } : makeBody(pos);
+    return {
+      id: id("p", "nextPlayerId"),
+      firstName: source.firstName || "Unknown",
+      lastName: source.lastName || "Player",
+      pos,
+      height: body.height,
+      weight: body.weight,
+      age: source.age || generateAge(pos, true),
+      yearsPro: source.yearsPro || 0,
+      teamId,
+      college: source.college || "Unknown",
+      draftYear: state.year - (source.yearsPro || 0),
+      draftPick: source.yearsPro > 0 ? "NFL" : "Rookie",
+      ratings,
+      ovr,
+      pot,
+      truePot: pot,
+      devTrait: nflDevTrait(source, ovr, pot),
+      regressionAge: generateRegressionAge(pos, hidden.longevity),
+      injury: { status: "Healthy", weeks: 0, history: [], prone: nflInjuryProne(pos, ratings.inj) },
+      contract: teamId ? makeContract(pos, ovr, pot, source.age || 25) : null,
+      stats: { season: blankStats(), career: blankStats(), history: [] },
+      awards: [],
+      morale: randInt(48, 86),
+      hidden,
+      madden: {
+        source: "EA Madden NFL 26 ratings",
+        team: source.team,
+        originalPosition: source.pos,
+        archetype: source.archetype || "",
+        abilities: (source.abilities || []).map(ability => ability.label).filter(Boolean),
+        stats: source.stats || {}
+      }
+    };
+  }
+
+  function loadNflModePlayers(setup = "real") {
+    const data = nflModeData();
+    if (!data?.ratings?.length) throw new Error("NFL mode data is not loaded.");
+    const sources = data.ratings.filter(player => player.ovr && player.firstName && player.lastName);
+    if (setup === "draft") {
+      const pool = sources.map(source => makeNflPlayer(source, null)).sort((a, b) => nflRosterDraftValue(b) - nflRosterDraftValue(a));
+      startNflLeagueDraft(pool);
+    } else {
+      loadNflCurrentTeams(sources);
+      refreshTeamTargetsFromRosters();
+      for (const team of state.teams) assignStarterContracts(team.id);
+    }
+    for (const team of state.teams) buildDepthChart(team.id);
+  }
+
+  function loadNflCurrentTeams(sources) {
+    const grouped = {};
+    for (const source of sources) {
+      const teamId = mapNflTeam(source.team);
+      (grouped[teamId || "FA"] ||= []).push(source);
+    }
+    for (const team of state.teams) {
+      const teamSources = (grouped[team.id] || []).sort((a, b) => b.ovr - a.ovr);
+      for (const [index, source] of teamSources.entries()) {
+        const player = makeNflPlayer(source, index < MAX_ROSTER ? team.id : null);
+        if (player.teamId) state.players.push(player);
+        else {
+          player.contract = null;
+          state.freeAgents.push(player);
+        }
+      }
+    }
+    for (const source of grouped.FA || []) {
+      const player = makeNflPlayer(source, null);
+      player.contract = null;
+      state.freeAgents.push(player);
+    }
+  }
+
+  function runNflLeagueDraft(pool) {
+    const draftOrder = state.teams.slice().sort((a, b) => a.targetOverall - b.targetOverall || a.id.localeCompare(b.id));
+    const rosterCounts = Object.fromEntries(state.teams.map(team => [team.id, 0]));
+    for (let roundValue = 0; roundValue < MAX_ROSTER; roundValue += 1) {
+      const order = roundValue % 2 === 0 ? draftOrder : draftOrder.slice().reverse();
+      for (const team of order) {
+        const player = selectNflLeagueDraftPlayer(pool, team.id);
+        if (!player) continue;
+        player.teamId = team.id;
+        player.contract = makeContract(player.pos, player.ovr, player.pot, player.age);
+        state.players.push(player);
+        rosterCounts[team.id] += 1;
+      }
+    }
+    for (const player of pool) {
+      player.teamId = null;
+      player.contract = null;
+      state.freeAgents.push(player);
+    }
+  }
+
+  function startNflLeagueDraft(pool) {
+    state.phase = "leagueDraft";
+    state.week = 0;
+    state.freeAgents = pool;
+    state.currentLeagueDraft = {
+      order: state.teams.slice().sort((a, b) => a.targetOverall - b.targetOverall || a.id.localeCompare(b.id)).map(team => team.id),
+      overall: 1,
+      round: 1,
+      pick: 1,
+      totalSelections: MAX_ROSTER * state.teams.length,
+      complete: false,
+      selections: []
+    };
+    ui.tab = "draft";
+  }
+
+  function currentLeagueDraftInfo() {
+    const draft = state.currentLeagueDraft;
+    if (!draft || draft.complete) return null;
+    if (draft.overall > draft.totalSelections) return null;
+    const roundValue = Math.ceil(draft.overall / state.teams.length);
+    const pickInRound = ((draft.overall - 1) % state.teams.length) + 1;
+    const roundOrder = roundValue % 2 === 1 ? draft.order : draft.order.slice().reverse();
+    return { overall: draft.overall, round: roundValue, pickInRound, ownerTeam: roundOrder[pickInRound - 1] };
+  }
+
+  function makeLeagueDraftSelection(playerId) {
+    const pickInfo = currentLeagueDraftInfo();
+    if (!pickInfo) return;
+    const player = state.freeAgents.find(item => item.id === playerId);
+    const team = getTeam(pickInfo.ownerTeam);
+    if (!player || !team || teamPlayers(team.id).length >= MAX_ROSTER) return;
+    player.teamId = team.id;
+    player.contract = makeContract(player.pos, player.ovr, player.pot, player.age);
+    state.freeAgents = state.freeAgents.filter(item => item.id !== player.id);
+    state.players.push(player);
+    state.currentLeagueDraft.selections.push({ overall: pickInfo.overall, round: pickInfo.round, pick: pickInfo.pickInRound, teamId: team.id, playerId: player.id, name: playerName(player), pos: player.pos, ovr: player.ovr });
+    buildDepthChart(team.id);
+    addNews("League draft pick", `${team.abbr} selected ${playerName(player)}, ${player.pos}, ${player.ovr} OVR at ${pickInfo.round}.${pickInfo.pickInRound}.`);
+    state.currentLeagueDraft.overall += 1;
+    state.currentLeagueDraft.round = Math.ceil(state.currentLeagueDraft.overall / state.teams.length);
+    state.currentLeagueDraft.pick = ((state.currentLeagueDraft.overall - 1) % state.teams.length) + 1;
+    if (state.currentLeagueDraft.overall > state.currentLeagueDraft.totalSelections || state.teams.every(teamValue => teamPlayers(teamValue.id).length >= MAX_ROSTER)) finishNflLeagueDraft();
+  }
+
+  function userLeagueDraftPlayer(playerId) {
+    const pickInfo = currentLeagueDraftInfo();
+    if (!pickInfo || pickInfo.ownerTeam !== USER_TEAM_ID) {
+      ui.toast = "Detroit is not on the clock.";
+      render();
+      return;
+    }
+    const player = getPlayer(playerId);
+    if (player && !confirmAction(`Draft ${playerName(player)} (${player.pos}, ${player.ovr} OVR) for Detroit?`)) return;
+    makeLeagueDraftSelection(playerId);
+    save();
+    render();
+  }
+
+  function aiMakeLeagueDraftPick(pickInfo) {
+    const player = selectNflLeagueDraftPlayer(state.freeAgents, pickInfo.ownerTeam, false, pickInfo);
+    if (player) makeLeagueDraftSelection(player.id);
+  }
+
+  function simOneLeagueDraftPick() {
+    const pickInfo = currentLeagueDraftInfo();
+    if (!pickInfo) {
+      finishNflLeagueDraft();
+      save();
+      render();
+      return;
+    }
+    if (pickInfo.ownerTeam === USER_TEAM_ID) {
+      ui.toast = "Detroit is on the clock. Pick a player from the league draft pool.";
+      render();
+      return;
+    }
+    aiMakeLeagueDraftPick(pickInfo);
+    save();
+    render();
+  }
+
+  function simLeagueDraftToUserPick() {
+    let pickInfo = currentLeagueDraftInfo();
+    if (!pickInfo) {
+      finishNflLeagueDraft();
+      save();
+      render();
+      return;
+    }
+    if (pickInfo.ownerTeam === USER_TEAM_ID) {
+      ui.toast = "Detroit is already on the clock.";
+      render();
+      return;
+    }
+    let count = 0;
+    while (pickInfo && pickInfo.ownerTeam !== USER_TEAM_ID && count < state.currentLeagueDraft.totalSelections) {
+      aiMakeLeagueDraftPick(pickInfo);
+      count += 1;
+      pickInfo = currentLeagueDraftInfo();
+    }
+    if (pickInfo?.ownerTeam === USER_TEAM_ID) ui.toast = `Detroit is on the clock at ${pickInfo.round}.${pickInfo.pickInRound}.`;
+    save();
+    render();
+  }
+
+  function finishNflLeagueDraft() {
+    if (!state.currentLeagueDraft || state.currentLeagueDraft.complete) return;
+    state.currentLeagueDraft.complete = true;
+    state.phase = "regular";
+    state.week = 1;
+    for (const team of state.teams) {
+      buildDepthChart(team.id);
+      assignStarterContracts(team.id);
+    }
+    refreshTeamTargetsFromRosters();
+    addNews("League draft complete", "Rosters are full. Week 1 is ready.");
+  }
+
+  function selectNflLeagueDraftPlayer(pool, teamId, remove = true, pickInfo = null) {
+    if (!pool.length) return null;
+    const needs = draftPositionNeeds(teamId);
+    const preferredPositions = new Set(needs.slice(0, 5).map(item => item.pos));
+    const rosterCount = teamPlayers(teamId).length;
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+    const limit = Math.min(pool.length, 180);
+    for (let i = 0; i < limit; i += 1) {
+      const player = pool[i];
+      const need = needs.find(item => item.pos === player.pos)?.need || 0;
+      const needBoost = preferredPositions.has(player.pos) ? 10 + need * 1.8 : need * 0.75;
+      const specialistPenalty = (player.pos === "K" || player.pos === "P") && rosterCount < 45 ? 70 : 0;
+      const roundPenalty = (player.pos === "K" || player.pos === "P") && pickInfo?.round <= 12 ? 25 : 0;
+      const score = nflRosterDraftValue(player) + needBoost + POSITION_VALUE[player.pos] * 8 - specialistPenalty - roundPenalty - i * 0.06;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    const index = bestIndex >= 0 ? bestIndex : 0;
+    return remove ? pool.splice(index, 1)[0] : pool[index];
+  }
+
+  function nflRosterDraftValue(player) {
+    return player.ovr * 1.7 + Math.max(0, player.pot - player.ovr) * 1.1 + POSITION_VALUE[player.pos] * 10 - Math.max(0, player.age - 29) * 1.3;
+  }
+
+  function refreshTeamTargetsFromRosters() {
+    for (const team of state.teams) {
+      const rating = teamRatingSummary(team);
+      team.targetOverall = rating.overall;
+      team.qualitySeed = (rating.overall - 78) / 6;
+    }
+  }
+
   function generateDraftClass(year) {
-    const classSize = 300;
+    const classSize = DRAFT_CLASS_SIZE;
     const players = [];
     const generational = chance(0.1) ? 1 : 0;
     const blueChips = randInt(2, 5);
@@ -1127,6 +1521,147 @@
     const replaceIndex = existingIndex >= 0 ? existingIndex : lowestRatedProspectIndex(draftClass, "QB");
     draftClass[replaceIndex >= 0 ? replaceIndex : draftClass.length - 1] = prospect;
     rankDraftClass(draftClass);
+  }
+
+  function applyNflDraftClasses() {
+    const data = nflModeData();
+    if (!data) return;
+    replaceDraftClassWithNflSeeds(2026, data.draft2026 || [], "nfl2026");
+    replaceDraftClassWithNflSeeds(2027, data.prospects2027 || [], "prospects2027");
+    replaceDraftClassWithNflSeeds(2028, data.prospects2028 || [], "prospects2028");
+  }
+
+  function replaceDraftClassWithNflSeeds(year, seeds, sourceKey) {
+    const generated = state.draftClasses[String(year)] || generateDraftClass(year);
+    const named = [];
+    const seenNames = new Set();
+    for (const [index, seed] of seeds.entries()) {
+      if (!seed?.name || !seed?.pos) continue;
+      const key = `${seed.name}:${seed.school || ""}`.toLowerCase();
+      if (seenNames.has(key)) continue;
+      seenNames.add(key);
+      named.push(makeNflDraftProspect(seed, year, sourceKey, index));
+    }
+    const namedKeys = new Set(named.map(prospect => playerName(prospect).toLowerCase()));
+    const filler = generated.filter(prospect => !namedKeys.has(playerName(prospect).toLowerCase()));
+    state.draftClasses[String(year)] = named.concat(filler).slice(0, DRAFT_CLASS_SIZE);
+    ensureDraftClassSize(year);
+    rankDraftClass(state.draftClasses[String(year)]);
+  }
+
+  function makeNflDraftProspect(seed, year, sourceKey, index) {
+    const pos = mapNflPosition(seed.pos);
+    const [firstName, lastName] = splitProspectName(seed.name);
+    const sourceRank = seed.overall || seed.rank || index + 1;
+    const yearsAway = Math.max(0, year - (state.year + 1));
+    const rankStrength = 1 - Math.min(1, Math.max(0, sourceRank - 1) / (sourceKey === "nfl2026" ? 224 : 90));
+    let trueOvr = Math.round(clamp(51 + rankStrength * 27 - yearsAway * 1.8 + POSITION_VALUE[pos] * 0.9 + gaussian(0, 1.8), 40, 82));
+    let truePot = Math.round(clamp(trueOvr + 5 + rankStrength * 14 + yearsAway * 1.7 + gaussian(0, 3.2), trueOvr - 2, 99));
+    if (sourceRank <= 3) {
+      trueOvr = Math.max(trueOvr, randInt(76, 81));
+      truePot = Math.max(truePot, randInt(91, 97));
+    } else if (sourceRank <= 12) {
+      trueOvr = Math.max(trueOvr, randInt(72, 78));
+      truePot = Math.max(truePot, randInt(86, 94));
+    } else if (sourceRank <= 32) {
+      trueOvr = Math.max(trueOvr, randInt(68, 75));
+      truePot = Math.max(truePot, randInt(81, 91));
+    }
+    if (sourceKey !== "nfl2026") {
+      trueOvr = Math.max(42, trueOvr - yearsAway);
+      truePot = Math.min(99, truePot + yearsAway);
+    }
+    trueOvr = Math.round(clamp(trueOvr, 40, 85));
+    truePot = Math.round(clamp(truePot, Math.max(38, trueOvr - 3), 99));
+    const body = bodyFromSeed(seed, pos);
+    const ratings = makeRatingsForPosition(pos, trueOvr, truePot);
+    const prospect = {
+      id: `d${year}-${sourceKey}-${slugify(seed.name)}-${sourceRank}`,
+      firstName,
+      lastName,
+      pos,
+      height: body.height,
+      weight: body.weight,
+      age: sourceKey === "nfl2026" ? randInt(21, 23) : sourceKey === "prospects2027" ? randInt(20, 22) : randInt(19, 21),
+      college: normalizeCollegeName(seed.school || "Unknown"),
+      year,
+      trueOvr,
+      truePot,
+      pot: truePot,
+      devTrait: nflDraftDevTrait(trueOvr, truePot, sourceRank),
+      bustGem: nflDraftBustGem(sourceRank),
+      ratings,
+      combine: makeCombine(pos, trueOvr),
+      collegeStats: seed.stats || makeCollegeStats(pos, trueOvr, truePot),
+      collegeAwards: nflDraftResume(pos, trueOvr, truePot, sourceRank, sourceKey),
+      comp: "",
+      rank: 0,
+      projectedRound: clamp(Math.ceil(sourceRank / 32), 1, 7),
+      sourceRank,
+      source: sourceKey
+    };
+    prospect.ratings.pot = truePot;
+    return prospect;
+  }
+
+  function nflDraftDevTrait(trueOvr, truePot, sourceRank) {
+    if (sourceRank <= 2 && trueOvr >= 78 && truePot >= 96) return "Generational";
+    if (sourceRank <= 8 && truePot >= 92) return "Superstar";
+    if (truePot >= 87 || trueOvr >= 74) return "Star";
+    return "Normal";
+  }
+
+  function nflDraftBustGem(sourceRank) {
+    const base = sourceRank <= 8 ? 0.55 : sourceRank <= 32 ? 0.25 : sourceRank <= 96 ? 0 : -0.12;
+    return clamp(base + gaussian(0, 0.58), -1.7, 1.7);
+  }
+
+  function nflDraftResume(pos, ovr, pot, sourceRank, sourceKey) {
+    const awards = makeCollegeAwards(pos, ovr, pot, sourceKey === "prospects2028" ? 20 : 21);
+    if (sourceRank <= 5) awards.unshift("Consensus top-5 prospect");
+    else if (sourceRank <= 32) awards.unshift("Projected first-round pick");
+    if (["QB", "RB", "WR"].includes(pos) && sourceRank <= 12 && !awards.some(award => award.includes("Heisman"))) awards.push("Heisman watch list");
+    return Array.from(new Set(awards));
+  }
+
+  function splitProspectName(name) {
+    const parts = String(name || "").replace(/\s+/g, " ").trim().split(" ");
+    const firstName = parts.shift() || "Unknown";
+    const lastName = parts.join(" ") || "Prospect";
+    return [capitalizeName(firstName), capitalizeName(lastName)];
+  }
+
+  function normalizeCollegeName(name) {
+    const value = String(name || "").replace(/\s+/g, " ").trim();
+    const abbreviations = new Set(["LSU", "USC", "UCLA", "TCU", "SMU", "BYU", "UNLV", "UTSA", "UCF"]);
+    return value.split(" ").map(part => {
+      const clean = part.replace(/[^A-Za-z]/g, "").toUpperCase();
+      if (abbreviations.has(clean)) return part.toUpperCase();
+      if (part === "(FL)" || part === "(OH)") return part;
+      return capitalizeName(part.toLowerCase());
+    }).join(" ");
+  }
+
+  function capitalizeName(value) {
+    return String(value || "").split("-").map(part => part ? part[0].toUpperCase() + part.slice(1) : part).join("-");
+  }
+
+  function slugify(value) {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  }
+
+  function bodyFromSeed(seed, pos) {
+    const height = parseHeight(seed.height);
+    const weight = Number(seed.weight || 0);
+    if (height && weight) return { height, weight };
+    return makeBody(pos);
+  }
+
+  function parseHeight(value) {
+    const match = String(value || "").match(/(\d+)'\s*(\d+)(?:\s+(\d+)\/(\d+))?/);
+    if (!match) return 0;
+    const fraction = match[3] && match[4] ? Number(match[3]) / Number(match[4]) : 0;
+    return Math.round(Number(match[1]) * 12 + Number(match[2]) + fraction);
   }
 
   function lowestRatedProspectIndex(draftClass, pos) {
@@ -1455,6 +1990,7 @@
   }
 
   function phaseLabel() {
+    if (state.phase === "leagueDraft") return "League Draft";
     if (state.phase === "preseason") return `Preseason W${state.week}`;
     if (state.phase === "regular") return `Week ${state.week}`;
     if (state.phase === "playoffs") return state.playoffRound;
@@ -1467,6 +2003,7 @@
 
   function displayPhaseLabel() {
     if (!ui.discreteMode) return phaseLabel();
+    if (state.phase === "leagueDraft") return "Staffing Draft";
     if (state.phase === "preseason" || state.phase === "regular") return `Cycle ${state.week}`;
     if (state.phase === "playoffs") return "Review Cycle";
     if (state.phase === "draft") return "Planning Board";
@@ -1697,6 +2234,7 @@
     else if (state.phase === "awards") completeAwards();
     else if (state.phase === "freeAgency") autoFreeAgencyThenDraft();
     else if (state.phase === "draft") simDraftPickOrAdvance();
+    else if (state.phase === "leagueDraft") simLeagueDraftToUserPick();
     else if (state.phase === "offseason") startNextSeason();
     state.lastAdvance = Date.now();
     save();
@@ -2672,7 +3210,7 @@
       let attempts = 0;
       while (capSpace(team.id) > 8 && teamPlayers(team.id).length < MAX_ROSTER && attempts < 12) {
         attempts += 1;
-        const needs = rosterNeeds(team.id);
+        const needs = draftPositionNeeds(team.id);
         const pos = needs[0]?.pos || pick(POSITIONS);
         const candidate = state.freeAgents.filter(player => player.pos === pos).sort((a, b) => b.ovr - a.ovr)[0];
         if (!candidate || estimatedAsk(candidate) > capSpace(team.id) + 3) break;
@@ -2684,6 +3222,50 @@
   function rosterNeeds(teamId) {
     const counts = Object.fromEntries(POSITIONS.map(pos => [pos, teamPlayers(teamId).filter(player => player.pos === pos).length]));
     return POSITIONS.map(pos => ({ pos, need: ROSTER_PLAN[pos] - counts[pos] })).filter(item => item.need > 0).sort((a, b) => b.need - a.need);
+  }
+
+  function positionGroupProfile(teamId, pos) {
+    const players = teamPlayers(teamId).filter(player => player.pos === pos && !playerIsRetired(player)).sort((a, b) => b.ovr - a.ovr);
+    const starterCount = DEPTH_NEEDS[pos] || 1;
+    const targetCount = ROSTER_PLAN[pos] || starterCount;
+    const startersGroup = players.slice(0, starterCount);
+    const topGroup = players.slice(0, Math.min(targetCount, players.length));
+    const avg = items => items.length ? items.reduce((sum, player) => sum + player.ovr, 0) / items.length : 45;
+    const ageRisk = startersGroup.length
+      ? startersGroup.reduce((sum, player) => sum + clamp((player.age - ((player.regressionAge || REGRESSION_AGES[player.pos]) - 2)) / 5, 0, 1.8), 0) / startersGroup.length
+      : 0.8;
+    const futureHelp = topGroup.length
+      ? topGroup.reduce((sum, player) => sum + Math.max(0, player.pot - player.ovr), 0) / topGroup.length
+      : 0;
+    return {
+      pos,
+      count: players.length,
+      starterCount,
+      targetCount,
+      starterAvg: round(avg(startersGroup), 1),
+      depthAvg: round(avg(topGroup), 1),
+      shortage: Math.max(0, targetCount - players.length),
+      starterShortage: Math.max(0, starterCount - players.length),
+      ageRisk,
+      futureHelp
+    };
+  }
+
+  function draftPositionNeed(teamId, pos) {
+    const profile = positionGroupProfile(teamId, pos);
+    const countNeed = profile.shortage * 1.8 + profile.starterShortage * 5.5;
+    const qualityNeed = clamp((77 - profile.starterAvg) * 0.34 + (72 - profile.depthAvg) * 0.18, 0, 18);
+    const ageNeed = clamp(profile.ageRisk * 7.5, 0, 12);
+    const upsideRelief = clamp(profile.futureHelp * 0.25, 0, 4);
+    const premiumLift = POSITION_VALUE[pos] * 2.2;
+    const specialistLimit = pos === "K" || pos === "P" ? -12 : 0;
+    return round(clamp(countNeed + qualityNeed + ageNeed + premiumLift + specialistLimit - upsideRelief, 0, 36), 1);
+  }
+
+  function draftPositionNeeds(teamId) {
+    return POSITIONS
+      .map(pos => ({ pos, need: draftPositionNeed(teamId, pos), profile: positionGroupProfile(teamId, pos) }))
+      .sort((a, b) => b.need - a.need || POSITION_VALUE[b.pos] - POSITION_VALUE[a.pos]);
   }
 
   function estimatedAsk(player) {
@@ -2741,6 +3323,10 @@
   }
 
   function signFreeAgent(playerId, teamId = USER_TEAM_ID, noisy = true) {
+    if (state.phase === "leagueDraft") {
+      if (noisy) ui.toast = "Complete the league draft before signing free agents.";
+      return false;
+    }
     const player = state.freeAgents.find(item => item.id === playerId);
     if (!player) return false;
     const team = getTeam(teamId);
@@ -2799,7 +3385,7 @@
   function currentPickInfo() {
     if (!state.currentDraft || state.currentDraft.complete) return null;
     const overall = state.currentDraft.overall;
-    if (overall > 224) return null;
+    if (overall > DRAFT_SELECTIONS) return null;
     const roundValue = Math.ceil(overall / 32);
     const pickInRound = ((overall - 1) % 32) + 1;
     for (const team of state.teams) {
@@ -2833,34 +3419,59 @@
   function aiMakePick(pickInfo) {
     const prospects = state.draftClasses[String(pickInfo.year)];
     const team = getTeam(pickInfo.ownerTeam);
-    const needs = rosterNeeds(team.id).map(item => item.pos);
-    const best = prospects.slice(0, 40).sort((a, b) => {
-      const needA = needs.includes(a.pos) ? 4 : 0;
-      const needB = needs.includes(b.pos) ? 4 : 0;
-      return prospectGrade(b) + needB - (prospectGrade(a) + needA);
-    })[0];
+    const poolSize = pickInfo.round <= 1 ? 70 : pickInfo.round <= 3 ? 120 : pickInfo.round <= 5 ? 190 : 260;
+    let candidates = prospects.slice(0, Math.min(prospects.length, poolSize));
+    if (pickInfo.round <= 5) {
+      const nonSpecialists = candidates.filter(prospect => prospect.pos !== "K" && prospect.pos !== "P");
+      if (nonSpecialists.length) candidates = nonSpecialists;
+    }
+    const best = candidates.sort((a, b) => aiDraftProspectScore(b, team, pickInfo) - aiDraftProspectScore(a, team, pickInfo))[0] || prospects[0];
     makeDraftSelection(pickInfo, best.id);
   }
 
-  function makeDraftSelection(pickInfo, prospectId) {
-    const draftClass = state.draftClasses[String(pickInfo.year)];
-    const prospect = draftClass.find(item => item.id === prospectId) || draftClass[0];
-    const team = getTeam(pickInfo.ownerTeam);
-    const player = makePlayer(prospect.pos, team.id, false, 0, {
+  function aiDraftProspectScore(prospect, team, pickInfo) {
+    const need = draftPositionNeed(team.id, prospect.pos);
+    const grade = prospectGrade(prospect);
+    const premium = POSITION_VALUE[prospect.pos] * (pickInfo.round <= 2 ? 5.6 : 3.8);
+    const reach = Math.max(0, (prospect.rank || pickInfo.overall) - pickInfo.overall);
+    const reachPenalty = pickInfo.round <= 2 ? reach * 0.13 : reach * 0.06;
+    const specialistPenalty = (prospect.pos === "K" || prospect.pos === "P")
+      ? pickInfo.round <= 5 ? 90 : pickInfo.round === 6 ? 28 : 8
+      : 0;
+    const needWeight = pickInfo.round <= 2 ? 0.82 : pickInfo.round <= 5 ? 1.05 : 1.22;
+    return grade + need * needWeight + premium - reachPenalty - specialistPenalty + seededGaussian(`${team.id}:${pickInfo.overall}:${prospect.id}`, 0, 1.7);
+  }
+
+  function makePlayerFromProspect(prospect, teamId, pickInfo = null) {
+    const player = makePlayer(prospect.pos, teamId, false, 0, {
       ovr: prospect.trueOvr,
       pot: prospect.truePot,
       devTrait: prospect.devTrait,
       bustGem: prospect.bustGem,
       height: prospect.height,
       weight: prospect.weight,
-      round: pickInfo.round,
-      pickInRound: pickInfo.pickInRound
+      round: pickInfo?.round || 7,
+      pickInRound: pickInfo?.pickInRound || 32
     });
     player.firstName = prospect.firstName;
     player.lastName = prospect.lastName;
     player.college = prospect.college;
     player.ratings = { ...prospect.ratings };
+    player.draftYear = pickInfo?.year || prospect.year || state.year + 1;
+    player.draftPick = pickInfo ? `${pickInfo.round}.${pickInfo.pickInRound}` : "UDFA";
     updateOverall(player);
+    if (!pickInfo) {
+      player.teamId = null;
+      player.contract = null;
+    }
+    return player;
+  }
+
+  function makeDraftSelection(pickInfo, prospectId) {
+    const draftClass = state.draftClasses[String(pickInfo.year)];
+    const prospect = draftClass.find(item => item.id === prospectId) || draftClass[0];
+    const team = getTeam(pickInfo.ownerTeam);
+    const player = makePlayerFromProspect(prospect, team.id, pickInfo);
     state.players.push(player);
     state.draftClasses[String(pickInfo.year)] = draftClass.filter(item => item.id !== prospect.id);
     state.currentDraft.selections.push({ overall: pickInfo.overall, round: pickInfo.round, pick: pickInfo.pickInRound, teamId: team.id, playerId: player.id, name: playerName(player), pos: player.pos, college: player.college });
@@ -2872,7 +3483,51 @@
     state.currentDraft.overall += 1;
     state.currentDraft.round = Math.ceil(state.currentDraft.overall / 32);
     state.currentDraft.pick = ((state.currentDraft.overall - 1) % 32) + 1;
-    if (state.currentDraft.overall > 224) finishDraft();
+    if (state.currentDraft.overall > DRAFT_SELECTIONS) finishDraft();
+  }
+
+  function simOneDraftPick() {
+    if (state.phase !== "draft") return;
+    const pickInfo = currentPickInfo();
+    if (!pickInfo) {
+      finishDraft();
+      save();
+      render();
+      return;
+    }
+    if (pickInfo.ownerTeam === USER_TEAM_ID) {
+      ui.toast = "Detroit is on the clock. Pick a player from the board.";
+      render();
+      return;
+    }
+    aiMakePick(pickInfo);
+    save();
+    render();
+  }
+
+  function simDraftToUserPick() {
+    if (state.phase !== "draft") return;
+    let pickInfo = currentPickInfo();
+    if (!pickInfo) {
+      finishDraft();
+      save();
+      render();
+      return;
+    }
+    if (pickInfo.ownerTeam === USER_TEAM_ID) {
+      ui.toast = "Detroit is already on the clock.";
+      render();
+      return;
+    }
+    let count = 0;
+    while (pickInfo && pickInfo.ownerTeam !== USER_TEAM_ID && count < DRAFT_SELECTIONS) {
+      aiMakePick(pickInfo);
+      count += 1;
+      pickInfo = currentPickInfo();
+    }
+    if (pickInfo?.ownerTeam === USER_TEAM_ID) ui.toast = `Detroit is on the clock at ${pickInfo.round}.${pickInfo.pickInRound}.`;
+    save();
+    render();
   }
 
   function simDraftRound() {
@@ -2882,11 +3537,10 @@
       const pickInfo = currentPickInfo();
       if (!pickInfo) break;
       if (pickInfo.ownerTeam === USER_TEAM_ID) {
-        const best = state.draftClasses[String(pickInfo.year)][0];
-        makeDraftSelection(pickInfo, best.id);
-      } else {
-        aiMakePick(pickInfo);
+        ui.toast = `Detroit is on the clock at ${pickInfo.round}.${pickInfo.pickInRound}.`;
+        break;
       }
+      aiMakePick(pickInfo);
     }
     save();
     render();
@@ -2895,6 +3549,7 @@
   function finishDraft() {
     if (state.currentDraft) state.currentDraft.complete = true;
     if (state.currentDraft?.year) {
+      convertUndraftedProspectsToFreeAgents(state.currentDraft.year);
       delete state.draftClasses[String(state.currentDraft.year)];
       ensureFutureDraftClasses(state.currentDraft.year + 1);
       ui.draftYear = state.currentDraft.year + 1;
@@ -2903,9 +3558,55 @@
     addNews("Draft complete", "The draft is complete. Offseason setup will roll into the next preseason.");
   }
 
+  function convertUndraftedProspectsToFreeAgents(year) {
+    const draftClass = state.draftClasses[String(year)] || [];
+    if (!draftClass.length) return;
+    let added = 0;
+    for (const prospect of draftClass) {
+      const player = makePlayerFromProspect(prospect, null, null);
+      player.draftYear = year;
+      player.draftPick = "UDFA";
+      state.freeAgents.push(player);
+      added += 1;
+    }
+    if (added) addNews("Undrafted free agents", `${added} undrafted rookies entered free agency.`);
+  }
+
   function ensureFutureDraftClasses(startYear = state.year + 1) {
     for (let year = startYear; year <= startYear + 2; year += 1) {
       if (!state.draftClasses[String(year)]) state.draftClasses[String(year)] = generateDraftClass(year);
+      ensureDraftClassSize(year);
+    }
+  }
+
+  function ensureDraftClassSize(year, minSize = DRAFT_CLASS_SIZE) {
+    const key = String(year);
+    const draftClass = state.draftClasses[key] ||= [];
+    if (draftClass.length >= minSize) return;
+    let guard = 0;
+    const seen = new Set(draftClass.map(prospect => `${playerName(prospect)}:${prospect.college}:${prospect.pos}`.toLowerCase()));
+    while (draftClass.length < minSize && guard < 6) {
+      guard += 1;
+      const fillers = generateDraftClass(year);
+      for (const filler of fillers) {
+        if (draftClass.length >= minSize) break;
+        const seenKey = `${playerName(filler)}:${filler.college}:${filler.pos}`.toLowerCase();
+        if (seen.has(seenKey)) continue;
+        seen.add(seenKey);
+        draftClass.push(cloneDraftFiller(filler, year, draftClass.length + 1));
+      }
+    }
+    rankDraftClass(draftClass);
+  }
+
+  function cloneDraftFiller(prospect, year, index) {
+    return {
+      ...prospect,
+      id: `d${year}-filler-${index}-${slugify(playerName(prospect))}`,
+      ratings: { ...prospect.ratings },
+      combine: { ...prospect.combine },
+      collegeAwards: [...(prospect.collegeAwards || [])],
+      source: prospect.source || "generated-filler"
     }
   }
 
@@ -3288,7 +3989,12 @@
                 <select data-control="newLeagueMode">
                   <option value="standard" ${ui.newLeagueMode === "standard" ? "selected" : ""}>Standard Set</option>
                   <option value="random" ${ui.newLeagueMode === "random" ? "selected" : ""}>Randomized Set</option>
+                  <option value="nfl" ${ui.newLeagueMode === "nfl" ? "selected" : ""}>NFL 2025</option>
                 </select>
+                ${ui.newLeagueMode === "nfl" ? `<select data-control="newLeagueNflSetup">
+                  <option value="real" ${ui.newLeagueNflSetup === "real" ? "selected" : ""}>Current teams</option>
+                  <option value="draft" ${ui.newLeagueNflSetup === "draft" ? "selected" : ""}>League draft</option>
+                </select>` : ""}
                 <button class="primary" data-action="createLeague">Start Clean League</button>
                 <textarea data-control="importText" placeholder="Paste exported save JSON">${escapeHtml(ui.importText)}</textarea>
                 <button data-action="importLeagueFromHub">Import Save As League</button>
@@ -3324,7 +4030,8 @@
 
   function renderPhaseBanner() {
     const disabled = state.gm.fired ? "disabled" : "";
-    const action = state.phase === "draft" && currentPickInfo()?.ownerTeam === USER_TEAM_ID ? (ui.discreteMode ? "Pending" : "On the clock") : (ui.discreteMode ? "Process" : "Advance");
+    const userDraftPick = (state.phase === "draft" && currentPickInfo()?.ownerTeam === USER_TEAM_ID) || (state.phase === "leagueDraft" && currentLeagueDraftInfo()?.ownerTeam === USER_TEAM_ID);
+    const action = userDraftPick ? (ui.discreteMode ? "Pending" : "On the clock") : (ui.discreteMode ? "Process" : "Advance");
     return `<div class="phase-banner">
       <strong>${displayPhaseLabel()}</strong>
       <span class="muted">${displayPhaseCaption()}</span>
@@ -3339,6 +4046,7 @@
     if (state.phase === "awards") return "Awards, retirements, progression, and GM review.";
     if (state.phase === "freeAgency") return "Sign free agents or advance to the draft.";
     if (state.phase === "draft") return "Draft picks are live; trade preview remains available.";
+    if (state.phase === "leagueDraft") return "Build Detroit's roster from the NFL player pool.";
     return "Prepare the next league year.";
   }
 
@@ -3507,6 +4215,7 @@
         </div>
         <div class="table-wrap"><table><thead><tr><th>Stat</th><th class="num">Season</th><th class="num">Career</th></tr></thead><tbody>${renderStatRows(player)}</tbody></table></div>
         <div class="table-wrap"><table><thead><tr><th>Attr</th>${attrs.slice(0, 11).map(attr => `<th class="num">${attr.toUpperCase()}</th>`).join("")}</tr></thead><tbody><tr><td>Ratings</td>${attrs.slice(0, 11).map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr><tr><td>Skills</td>${attrs.slice(11).map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr></tbody></table></div>
+        ${player.madden?.abilities?.length ? `<div><strong>Madden Abilities</strong><div class="muted">${player.madden.abilities.slice(0, 8).join(", ")}</div></div>` : ""}
         <div><strong>Awards</strong><div class="muted">${player.awards.length ? player.awards.slice(-8).map(award => `${award.year} ${award.award}`).join(", ") : "None"}</div></div>
         <div><strong>History</strong><div class="muted">${player.stats.history.length ? player.stats.history.slice(-5).map(row => `${row.year} ${row.team} ${row.ovr} OVR`).join(" - ") : "No completed seasons"}</div></div>
       </div>
@@ -3751,10 +4460,12 @@
   }
 
   function renderDraft() {
+    if (state.phase === "leagueDraft" && state.currentLeagueDraft && !state.currentLeagueDraft.complete) return renderNflLeagueDraft();
     const years = Object.keys(state.draftClasses).map(Number).sort((a, b) => a - b);
     const draftClass = state.draftClasses[String(ui.draftYear)] || [];
     const pickInfo = currentPickInfo();
     const selected = getProspect(ui.selectedProspectId) || draftClass[0];
+    const userOnClock = state.phase === "draft" && pickInfo?.ownerTeam === USER_TEAM_ID;
     const prospects = draftClass.slice().sort((a, b) => {
       if (ui.draftSort === "pos") return a.pos.localeCompare(b.pos) || a.rank - b.rank;
       if (ui.draftSort === "pot") return scoutedValue(b, "pot") - scoutedValue(a, "pot") || a.rank - b.rank;
@@ -3766,7 +4477,7 @@
         <h2>${displayTabLabel("draft", "Draft")}</h2>
         <select data-control="draftYear">${years.map(year => `<option value="${year}" ${Number(ui.draftYear) === year ? "selected" : ""}>${year}</option>`).join("")}</select>
         <select data-control="draftSort"><option value="rank" ${ui.draftSort === "rank" ? "selected" : ""}>Rank</option><option value="pot" ${ui.draftSort === "pot" ? "selected" : ""}>Potential</option><option value="ovr" ${ui.draftSort === "ovr" ? "selected" : ""}>Current</option><option value="pos" ${ui.draftSort === "pos" ? "selected" : ""}>Position</option></select>
-        ${state.phase === "draft" ? `<button data-action="simPick">Sim Pick</button><button data-action="simRound">Sim Round</button>` : ""}
+        ${state.phase === "draft" ? `<button data-action="simPick" ${userOnClock ? "disabled" : ""}>Sim Pick</button><button data-action="simToUserPick" ${userOnClock ? "disabled" : ""}>Sim To My Pick</button><button data-action="simRound" ${userOnClock ? "disabled" : ""}>Sim Round</button>` : ""}
       </div>
       ${state.phase === "draft" && pickInfo ? `<div class="phase-banner"><strong>Pick ${pickInfo.overall}</strong><span>${getTeam(pickInfo.ownerTeam).abbr} - Round ${pickInfo.round}, Pick ${pickInfo.pickInRound}</span></div>` : ""}
       <div class="grid two">
@@ -3774,6 +4485,59 @@
         <section class="panel"><div class="panel-header"><h3>Scouting Card</h3></div><div class="panel-body">${selected ? renderProspectCard(selected) : `<div class="empty">No prospects.</div>`}</div></section>
       </div>
     `;
+  }
+
+  function renderNflLeagueDraft() {
+    const pickInfo = currentLeagueDraftInfo();
+    const team = pickInfo ? getTeam(pickInfo.ownerTeam) : null;
+    const userOnClock = pickInfo?.ownerTeam === USER_TEAM_ID;
+    const query = ui.playerSearch.toLowerCase();
+    const pool = state.freeAgents
+      .filter(player => (ui.rosterPos === "ALL" || player.pos === ui.rosterPos) && (!query || playerName(player).toLowerCase().includes(query) || player.pos.toLowerCase().includes(query) || player.college.toLowerCase().includes(query)))
+      .sort((a, b) => {
+        if (ui.playerSort === "age") return a.age - b.age;
+        if (ui.playerSort === "value") return playerTradeValue(b) - playerTradeValue(a);
+        if (ui.playerSort === "pot") return b.pot - a.pot || b.ovr - a.ovr;
+        return b.ovr - a.ovr || b.pot - a.pot;
+      })
+      .slice(0, 260);
+    return `
+      <div class="toolbar">
+        <h2>NFL League Draft</h2>
+        <input data-control="playerSearch" placeholder="Search player pool" value="${escapeAttr(ui.playerSearch)}">
+        <select data-control="rosterPos"><option value="ALL">All</option>${POSITIONS.map(pos => `<option value="${pos}" ${ui.rosterPos === pos ? "selected" : ""}>${pos}</option>`).join("")}</select>
+        <select data-control="playerSort">${["ovr", "pot", "age", "value"].map(key => `<option value="${key}" ${ui.playerSort === key ? "selected" : ""}>${key}</option>`).join("")}</select>
+        <button data-action="simLeagueDraftPick" ${userOnClock ? "disabled" : ""}>Sim Pick</button>
+        <button data-action="simLeagueDraftToUserPick" ${userOnClock ? "disabled" : ""}>Sim To My Pick</button>
+      </div>
+      ${pickInfo ? `<div class="phase-banner"><strong>Pick ${pickInfo.overall}</strong><span>${team?.abbr || ""} - Round ${pickInfo.round}, Pick ${pickInfo.pickInRound}</span></div>` : ""}
+      <div class="grid two">
+        <section class="panel">
+          <div class="panel-header"><h3>Player Pool</h3><span class="spacer muted">${state.freeAgents.length} available</span></div>
+          <div class="table-wrap">${renderLeagueDraftPoolTable(pool, userOnClock)}</div>
+        </section>
+        <section class="panel">
+          <div class="panel-header"><h3>Detroit Roster</h3><span class="spacer muted">${teamPlayers(USER_TEAM_ID).length}/53</span></div>
+          <div class="table-wrap">${renderRosterTable(teamPlayers(USER_TEAM_ID).sort((a, b) => positionOrder(a.pos) - positionOrder(b.pos) || b.ovr - a.ovr))}</div>
+        </section>
+      </div>
+    `;
+  }
+
+  function renderLeagueDraftPoolTable(players, userOnClock) {
+    return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th>College</th><th class="num">Value</th><th></th></tr></thead><tbody>
+      ${players.map(player => `<tr>
+        <td>${player.pos}</td>
+        <td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td>
+        <td class="num">${player.age}</td>
+        <td>${sizeLabel(player)}</td>
+        <td class="num">${player.ovr}</td>
+        <td class="num">${player.pot}</td>
+        <td>${player.college}</td>
+        <td class="num">${playerTradeValue(player)}</td>
+        <td>${userOnClock ? `<button class="primary" data-action="draftLeaguePlayer" data-player="${player.id}">Draft</button>` : ""}</td>
+      </tr>`).join("")}
+    </tbody></table>`;
   }
 
   function renderProspectTable(prospects, pickInfo) {
@@ -3891,24 +4655,47 @@
         <select data-control="tradePartner">${state.teams.filter(team => team.id !== USER_TEAM_ID).map(team => `<option value="${team.id}" ${ui.tradePartner === team.id ? "selected" : ""}>${teamName(team)} - ${teamRatingLine(team)}</option>`).join("")}</select>
         <button class="primary" data-action="offerTrade" ${preview.accepted ? "" : "disabled"}>Offer Trade</button>
       </div>
-      <section class="panel">
-        <div class="panel-header"><h3>Preview</h3><span class="spacer ${preview.accepted ? "good" : "bad"}">${preview.accepted ? "Likely accepted" : "Needs more value"}</span></div>
-        <div class="panel-body">
-          <div class="metric-row">
-            <div class="metric"><label>Detroit Sends</label><strong>${round(preview.mineValue, 1)}</strong><span>${Array.from(ui.tradeMine).length} assets</span></div>
-            <div class="metric"><label>${partner.abbr} Sends</label><strong>${round(preview.theirsValue, 1)}</strong><span>${Array.from(ui.tradeTheirs).length} assets</span></div>
-            <div class="metric"><label>Value Gap</label><strong class="${preview.delta >= 0 ? "good" : "bad"}">${round(preview.delta, 1)}</strong><span>premium adjusted</span></div>
-            <div class="metric"><label>Cap After</label><strong>${money(preview.cap.userAfter)}</strong><span>change ${money(-preview.cap.userChange)}</span></div>
-            <div class="metric"><label>DET OVR</label><strong>${userRating.overall}</strong><span>OFF ${userRating.offense} / DEF ${userRating.defense} / ST ${userRating.specialTeams}</span></div>
-            <div class="metric"><label>${partner.abbr} OVR</label><strong>${partnerRating.overall}</strong><span>OFF ${partnerRating.offense} / DEF ${partnerRating.defense} / ST ${partnerRating.specialTeams}</span></div>
-          </div>
-        </div>
-      </section>
+      ${renderTradePreviewPanel(preview, partner, userRating, partnerRating)}
       <div class="asset-grid">
         ${renderAssetPanel(USER_TEAM_ID, ui.tradeMine, "Detroit Assets", "mine")}
         ${renderAssetPanel(partner.id, ui.tradeTheirs, `${partner.abbr} Assets`, "theirs")}
       </div>
     `;
+  }
+
+  function renderTradePreviewPanel(preview, partner, userRating, partnerRating) {
+    return `<section class="panel" data-trade-preview>
+      <div class="panel-header"><h3>Preview</h3><span class="spacer ${preview.accepted ? "good" : "bad"}">${preview.accepted ? "Likely accepted" : "Needs more value"}</span></div>
+      <div class="panel-body">
+        <div class="metric-row">
+          <div class="metric"><label>Detroit Sends</label><strong>${round(preview.mineValue, 1)}</strong><span>${ui.tradeMine.size} assets</span></div>
+          <div class="metric"><label>${partner.abbr} Sends</label><strong>${round(preview.theirsValue, 1)}</strong><span>${ui.tradeTheirs.size} assets</span></div>
+          <div class="metric"><label>Value Gap</label><strong class="${preview.delta >= 0 ? "good" : "bad"}">${round(preview.delta, 1)}</strong><span>premium adjusted</span></div>
+          <div class="metric"><label>Cap After</label><strong>${money(preview.cap.userAfter)}</strong><span>change ${money(-preview.cap.userChange)}</span></div>
+          <div class="metric"><label>DET OVR</label><strong>${userRating.overall}</strong><span>OFF ${userRating.offense} / DEF ${userRating.defense} / ST ${userRating.specialTeams}</span></div>
+          <div class="metric"><label>${partner.abbr} OVR</label><strong>${partnerRating.overall}</strong><span>OFF ${partnerRating.offense} / DEF ${partnerRating.defense} / ST ${partnerRating.specialTeams}</span></div>
+        </div>
+      </div>
+    </section>`;
+  }
+
+  function refreshTradeSelectionUi() {
+    const partner = getTeam(ui.tradePartner) || state.teams.find(team => team.id !== USER_TEAM_ID);
+    if (!partner) return;
+    const preview = tradePreview();
+    const previewEl = app.querySelector("[data-trade-preview]");
+    if (previewEl) {
+      previewEl.outerHTML = renderTradePreviewPanel(preview, partner, teamRatingSummary(getTeam(USER_TEAM_ID)), teamRatingSummary(partner));
+    }
+    const offerButton = app.querySelector('[data-action="offerTrade"]');
+    if (offerButton) offerButton.disabled = !preview.accepted;
+    updateTradeAssetCount("mine", getTeam(USER_TEAM_ID), ui.tradeMine);
+    updateTradeAssetCount("theirs", partner, ui.tradeTheirs);
+  }
+
+  function updateTradeAssetCount(side, team, selectedSet) {
+    const node = app.querySelector(`[data-asset-count="${side}"]`);
+    if (node && team) node.textContent = `${teamRatingLine(team)} - ${selectedSet.size} selected`;
   }
 
   function renderAssetPanel(teamId, selectedSet, title, side) {
@@ -3918,7 +4705,7 @@
       .filter(pickItem => pickItem.year >= state.year + 1 && pickItem.year <= state.year + 3)
       .sort((a, b) => a.year - b.year || a.round - b.round || projectedOverallForPick(a) - projectedOverallForPick(b) || a.originalTeam.localeCompare(b.originalTeam));
     return `<section class="panel">
-      <div class="panel-header"><h3>${title}</h3><span class="spacer muted">${teamRatingLine(team)} - ${selectedSet.size} selected</span></div>
+      <div class="panel-header"><h3>${title}</h3><span class="spacer muted" data-asset-count="${side}">${teamRatingLine(team)} - ${selectedSet.size} selected</span></div>
       <div class="trade-assets">
         <div class="asset-section-title"><strong>Roster</strong><span>${players.length} players</span></div>
         <div class="table-wrap asset-table-wrap">${renderTradeRosterAssets(players, selectedSet, side)}</div>
@@ -4180,7 +4967,7 @@
         ui.tab = "dashboard";
         ui.profileOpen = false;
         ui.prospectProfileOpen = false;
-        createNewLeague(leagueName, ui.newLeagueMode);
+        createNewLeague(leagueName, ui.newLeagueMode, { nflSetup: ui.newLeagueNflSetup });
         ui.newLeagueName = "";
         render();
         await save();
@@ -4233,22 +5020,19 @@
       ui.profileOpen = false;
       render();
     } else if (action === "draftProspect") userDraftProspect(target.dataset.player);
-    else if (action === "simPick") {
-      const pickInfo = currentPickInfo();
-      if (pickInfo) {
-        if (pickInfo.ownerTeam === USER_TEAM_ID) makeDraftSelection(pickInfo, state.draftClasses[String(pickInfo.year)][0].id);
-        else aiMakePick(pickInfo);
-      }
-      save();
-      render();
-    } else if (action === "simRound") simDraftRound();
+    else if (action === "simPick") simOneDraftPick();
+    else if (action === "simToUserPick") simDraftToUserPick();
+    else if (action === "simRound") simDraftRound();
+    else if (action === "draftLeaguePlayer") userLeagueDraftPlayer(target.dataset.player);
+    else if (action === "simLeagueDraftPick") simOneLeagueDraftPick();
+    else if (action === "simLeagueDraftToUserPick") simLeagueDraftToUserPick();
     else if (action === "signFA") signFreeAgent(target.dataset.player);
     else if (action === "convinceRetirement") convinceRetirement(target.dataset.player);
     else if (action === "toggleAsset") {
       const set = target.dataset.side === "mine" ? ui.tradeMine : ui.tradeTheirs;
       if (target.checked) set.add(target.dataset.asset);
       else set.delete(target.dataset.asset);
-      render();
+      refreshTradeSelectionUi();
     } else if (action === "offerTrade") offerTrade();
     else if (action === "extendPlayer") extendPlayer(target.dataset.player);
     else if (action === "upgradeFacility") upgradeFacility(target.dataset.kind);
@@ -4280,7 +5064,7 @@
     } else if (action === "newLeague") {
       if (confirmAction("Start a separate clean league? Your current league will remain saved.")) {
         ui = { ...ui, tab: "dashboard", tradeMine: new Set(), tradeTheirs: new Set(), toast: "" };
-        createNewLeague(ui.newLeagueName.trim(), ui.newLeagueMode);
+        createNewLeague(ui.newLeagueName.trim(), ui.newLeagueMode, { nflSetup: ui.newLeagueNflSetup });
         render();
         await save();
         render();
@@ -4307,6 +5091,7 @@
     }
     if (key === "newLeagueName") ui.newLeagueName = control.value;
     if (key === "newLeagueMode") ui.newLeagueMode = control.value;
+    if (key === "newLeagueNflSetup") ui.newLeagueNflSetup = control.value;
     if (key === "importText") ui.importText = control.value;
     await save();
     render();
