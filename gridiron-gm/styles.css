@@ -144,6 +144,20 @@ textarea {
   justify-content: flex-end;
 }
 
+.mode-toggle {
+  min-height: 28px;
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08);
+  color: #eef2ff;
+  font-size: 12px;
+}
+
+.mode-toggle:hover {
+  border-color: rgba(255,255,255,0.34);
+  background: rgba(255,255,255,0.16);
+  color: #ffffff;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -361,6 +375,13 @@ textarea {
   color: rgba(255,255,255,0.78);
   font-size: 12px;
   margin-top: 4px;
+}
+
+.field-team small {
+  display: block;
+  color: rgba(255,255,255,0.72);
+  font-size: 11px;
+  margin-top: 3px;
 }
 
 .score {
@@ -686,12 +707,37 @@ tr:hover td {
 
 .compact-actions {
   display: inline-flex;
+  align-items: center;
   gap: 4px;
 }
 
 .compact-actions button {
   min-width: 32px;
   padding: 0 7px;
+}
+
+.inline-player-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+button.mini-button {
+  min-height: 26px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.toggle-row input {
+  min-height: auto;
 }
 
 .phase-banner {
@@ -739,6 +785,116 @@ tr:hover td {
   color: #cbd5e1;
   margin-top: 4px;
   font-size: 13px;
+}
+
+.discrete-mode {
+  --bg: #f6f6f6;
+  --surface: #ffffff;
+  --surface-2: #f1f1f1;
+  --line: #d0d0d0;
+  --text: #161616;
+  --muted: #666666;
+  --accent: #2f2f2f;
+  --accent-2: #555555;
+  --gold: #555555;
+  --good: #242424;
+  --bad: #111111;
+  --warn: #4a4a4a;
+  --nav: #1f1f1f;
+  --nav-2: #303030;
+  --shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+  filter: grayscale(1);
+}
+
+.shell.discrete-mode,
+.league-hub.discrete-mode {
+  background: var(--bg);
+}
+
+.discrete-mode .topbar,
+.discrete-mode .hub-header {
+  background: #1f1f1f;
+  border-bottom-color: #595959;
+}
+
+.discrete-mode .badge {
+  background: #333333;
+  border-color: rgba(255,255,255,0.32);
+}
+
+.discrete-mode .nav-tabs {
+  background: #303030;
+}
+
+.discrete-mode .nav-tabs button.active {
+  box-shadow: inset 0 -3px 0 #f8f8f8;
+  background: rgba(255,255,255,0.08);
+}
+
+.discrete-mode .mode-toggle {
+  background: #f7f7f7;
+  border-color: #cfcfcf;
+  color: #1f1f1f;
+}
+
+.discrete-mode .mode-toggle:hover {
+  background: #e9e9e9;
+  border-color: #a8a8a8;
+  color: #111111;
+}
+
+.discrete-mode button.primary {
+  background: #2f2f2f;
+  border-color: #2f2f2f;
+}
+
+.discrete-mode button.danger,
+.discrete-mode .pill.good,
+.discrete-mode .pill.bad,
+.discrete-mode .pill.warn {
+  background: #f5f5f5;
+  border-color: #c8c8c8;
+  color: #1f1f1f;
+}
+
+.discrete-mode .field-strip {
+  border-color: #4c4c4c;
+  background:
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.08) 0 1px, transparent 1px 10%),
+    linear-gradient(90deg, #eeeeee, #fafafa 50%, #eeeeee);
+  color: #1a1a1a;
+}
+
+.discrete-mode .field-strip:before,
+.discrete-mode .field-strip:after {
+  background: rgba(0,0,0,0.05);
+}
+
+.discrete-mode .field-team span,
+.discrete-mode .field-team small {
+  color: #555555;
+}
+
+.discrete-mode .score {
+  background: #ffffff;
+  border-color: #b9b9b9;
+  color: #1a1a1a;
+}
+
+.discrete-mode .link-button {
+  color: #1a1a1a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.discrete-mode .phase-banner {
+  border-left-color: #3a3a3a;
+}
+
+.discrete-mode .toast {
+  background: #f5f5f5;
+  border-color: #c8c8c8;
+  color: #1f1f1f;
 }
 
 .hub-main {

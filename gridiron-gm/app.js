@@ -4,6 +4,7 @@
   const LEGACY_SAVE_KEY = "detroit-wolverines-gm-save-v2";
   const LEAGUE_INDEX_KEY = "gridiron-gm-league-index-v1";
   const LEAGUE_SAVE_PREFIX = "gridiron-gm-league-";
+  const DISCRETE_MODE_KEY = "gridiron-gm-discrete-mode";
   const DB_NAME = "gridiron-gm-db-v1";
   const DB_STORE = "leagues";
   const CURRENT_YEAR = 2026;
@@ -219,6 +220,22 @@
     ["freeAgency", "Free Agency"], ["trades", "Trades"], ["finance", "Finance"], ["records", "Records"],
     ["awards", "Awards"], ["settings", "Settings"]
   ];
+  const DISCRETE_TAB_LABELS = {
+    dashboard: "Overview",
+    roster: "Personnel",
+    depth: "Assignments",
+    players: "Directory",
+    schedule: "Calendar",
+    standings: "Scorecard",
+    stats: "Metrics",
+    draft: "Pipeline",
+    freeAgency: "Open Roles",
+    trades: "Transactions",
+    finance: "Budget",
+    records: "Archive",
+    awards: "Reviews",
+    settings: "Settings"
+  };
 
   const app = document.getElementById("app");
   let state = null;
@@ -244,7 +261,8 @@
     toast: "",
     newLeagueName: "",
     newLeagueMode: "standard",
-    importText: ""
+    importText: "",
+    discreteMode: loadDiscreteModePreference()
   };
 
   function clamp(value, min, max) {
@@ -1447,6 +1465,48 @@
     return state.phase;
   }
 
+  function displayPhaseLabel() {
+    if (!ui.discreteMode) return phaseLabel();
+    if (state.phase === "preseason" || state.phase === "regular") return `Cycle ${state.week}`;
+    if (state.phase === "playoffs") return "Review Cycle";
+    if (state.phase === "draft") return "Planning Board";
+    if (state.phase === "freeAgency") return "Resource Review";
+    if (state.phase === "awards") return "Annual Review";
+    if (state.phase === "offseason") return "Planning";
+    return "Active";
+  }
+
+  function displayPhaseCaption() {
+    if (!ui.discreteMode) return phaseCaption();
+    if (state.gm.fired) return "Access has been archived.";
+    return "Workbook updates are ready to process.";
+  }
+
+  function displayTabLabel(key, label) {
+    return ui.discreteMode ? (DISCRETE_TAB_LABELS[key] || label) : label;
+  }
+
+  function loadDiscreteModePreference() {
+    try {
+      return localStorage.getItem(DISCRETE_MODE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function saveDiscreteModePreference(value) {
+    try {
+      localStorage.setItem(DISCRETE_MODE_KEY, value ? "1" : "0");
+    } catch {
+      // League saves still retain the UI setting when localStorage is unavailable.
+    }
+  }
+
+  function setDiscreteMode(value) {
+    ui.discreteMode = !!value;
+    saveDiscreteModePreference(ui.discreteMode);
+  }
+
   function save() {
     if (!state) return Promise.resolve();
     state.updatedAt = Date.now();
@@ -1469,6 +1529,7 @@
     });
     state = null;
     ui.screen = "hub";
+    ui.discreteMode = loadDiscreteModePreference();
   }
 
   async function migrateLegacySave() {
@@ -1509,7 +1570,8 @@
         tradeTheirs: new Set(packed.ui?.tradeTheirs || []),
         toast: "",
         profileOpen: false,
-        prospectProfileOpen: false
+        prospectProfileOpen: false,
+        discreteMode: loadDiscreteModePreference()
       };
       migrateState();
       await save();
@@ -2033,6 +2095,28 @@
 
   function defensiveRating(team) {
     return unitRating(team, "DE", 2, "passRush") * 0.15 + unitRating(team, "DT", 2, "runStop") * 0.14 + unitRating(team, "LB", 3, "runStop") * 0.16 + unitRating(team, "CB", 3, "coverage") * 0.21 + unitRating(team, "S", 2, "coverage") * 0.13 + unitRating(team, "LB", 3, "coverage") * 0.06 + team.facilities.coaching * 1.2 + 17;
+  }
+
+  function specialTeamsRating(team) {
+    return unitRating(team, "K", 1, "kick") * 0.58 + unitRating(team, "P", 1, "punt") * 0.3 + team.facilities.coaching * 0.8 + 7;
+  }
+
+  function teamRatingSummary(team) {
+    if (!team) return { overall: 0, offense: 0, defense: 0, specialTeams: 0 };
+    const offense = round(clamp(offensiveRating(team), 35, 99), 1);
+    const defense = round(clamp(defensiveRating(team), 35, 99), 1);
+    const specialTeams = round(clamp(specialTeamsRating(team), 35, 99), 1);
+    const overall = round(clamp(offense * 0.49 + defense * 0.45 + specialTeams * 0.06, 35, 99), 1);
+    return { overall, offense, defense, specialTeams };
+  }
+
+  function teamRatingLine(team) {
+    const rating = teamRatingSummary(team);
+    return `OVR ${rating.overall} / OFF ${rating.offense} / DEF ${rating.defense} / ST ${rating.specialTeams}`;
+  }
+
+  function renderTeamNameWithRatings(team) {
+    return `<div><strong>${teamName(team)}</strong><div class="muted">${teamRatingLine(team)}</div></div>`;
   }
 
   function defensiveCoverageRating(team) {
@@ -2841,9 +2925,40 @@
     return state.phase === "regular" && state.week > 10;
   }
 
+  function projectedDraftScore(team) {
+    const games = team.wins + team.losses + team.ties;
+    const rating = teamRatingSummary(team).overall;
+    const strengthWinPct = clamp(0.5 + (rating - 78) / 52, 0.18, 0.82);
+    if (!games) return strengthWinPct * 100 + (rating - 78) * 0.08;
+    const currentWinPct = (team.wins + team.ties * 0.5) / games;
+    const resultWeight = clamp(games / 12, 0.12, 0.78);
+    const pointDiffPerGame = clamp((team.pf - team.pa) / games, -24, 24);
+    const pointDiffSignal = pointDiffPerGame / 30;
+    const projectedWinPct = currentWinPct * resultWeight + strengthWinPct * (1 - resultWeight) + pointDiffSignal * resultWeight * 0.45;
+    return projectedWinPct * 100 + (rating - 78) * 0.08;
+  }
+
+  function projectedDraftOrder() {
+    return state.teams.slice().sort((a, b) => projectedDraftScore(a) - projectedDraftScore(b) || a.id.localeCompare(b.id));
+  }
+
+  function projectedPickInRound(pickAsset) {
+    if (pickAsset.overall) return ((pickAsset.overall - 1) % 32) + 1;
+    const order = projectedDraftOrder();
+    const index = order.findIndex(team => team.id === pickAsset.originalTeam);
+    const rawSlot = index >= 0 ? index + 1 : 16.5;
+    const yearGap = Math.max(0, pickAsset.year - (state.year + 1));
+    const confidence = 0.78 ** yearGap;
+    return Math.round(clamp(16.5 + (rawSlot - 16.5) * confidence, 1, 32));
+  }
+
+  function projectedOverallForPick(pickAsset) {
+    return pickAsset.overall || ((pickAsset.round - 1) * 32 + projectedPickInRound(pickAsset));
+  }
+
   function pickValue(pickAsset) {
     const yearGap = Math.max(0, pickAsset.year - (state.year + 1));
-    const overall = pickAsset.overall || ((pickAsset.round - 1) * 32 + 16);
+    const overall = projectedOverallForPick(pickAsset);
     const firstRound = [3000, 2600, 2200, 1800, 1700, 1600, 1500, 1400, 1350, 1300, 1250, 1200, 1150, 1100, 1050, 1000, 950, 900, 875, 850, 800, 780, 760, 740, 720, 700, 680, 660, 640, 620, 600, 590];
     let value;
     if (overall <= 32) value = firstRound[overall - 1];
@@ -2896,7 +3011,7 @@
 
   function pickSlotLabel(pickAsset) {
     const pickNumber = pickInRound(pickAsset);
-    return pickNumber ? `R${pickAsset.round}.${pickNumber}` : `R${pickAsset.round}, pick TBD`;
+    return pickNumber ? `R${pickAsset.round}.${pickNumber}` : `R${pickAsset.round}.${projectedPickInRound(pickAsset)} proj`;
   }
 
   function assetLabel(assetId) {
@@ -2977,6 +3092,30 @@
     ui.tradeTheirs.clear();
     ui.toast = "Trade accepted.";
     save();
+    render();
+  }
+
+  function startTradeForPlayer(playerId) {
+    const player = getPlayer(playerId);
+    if (!player || !player.teamId || playerIsRetired(player)) return;
+    ui.profileOpen = false;
+    ui.prospectProfileOpen = false;
+    ui.tab = "trades";
+    if (tradeDeadlinePassed()) {
+      ui.toast = "The trade deadline has passed for player trades.";
+      render();
+      return;
+    }
+    const assetId = `player:${player.id}`;
+    if (player.teamId === USER_TEAM_ID) {
+      ui.tradeMine.add(assetId);
+    } else {
+      if (ui.tradePartner !== player.teamId) {
+        ui.tradePartner = player.teamId;
+        ui.tradeTheirs.clear();
+      }
+      ui.tradeTheirs.add(assetId);
+    }
     render();
   }
 
@@ -3088,23 +3227,29 @@
       return;
     }
     const team = getTeam(USER_TEAM_ID);
+    const discreteClass = ui.discreteMode ? " discrete-mode" : "";
+    const shellTitle = ui.discreteMode ? "Operations Workbook" : "Detroit Wolverines GM";
+    const shellSubtitle = ui.discreteMode
+      ? `${state.year} - ${displayPhaseLabel()} - Portfolio ${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}`
+      : `${state.year} - ${phaseLabel()} - ${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}`;
     app.innerHTML = `
-      <div class="shell">
+      <div class="shell${discreteClass}">
         <header class="topbar">
           <div class="brand-row">
-            <div class="badge">DW</div>
+            <div class="badge">${ui.discreteMode ? "OPS" : "DW"}</div>
             <div class="brand-title">
-              <h1>Detroit Wolverines GM</h1>
-              <div>${state.year} - ${phaseLabel()} - ${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}</div>
+              <h1>${shellTitle}</h1>
+              <div>${shellSubtitle}</div>
             </div>
             <div class="status-strip">
-              <span class="pill">${state.phase.toUpperCase()}</span>
-              <span class="pill ${capSpace(USER_TEAM_ID) < 0 ? "bad" : "good"}">Cap ${money(capSpace(USER_TEAM_ID))}</span>
+              <span class="pill">${ui.discreteMode ? "ACTIVE" : state.phase.toUpperCase()}</span>
+              <span class="pill ${capSpace(USER_TEAM_ID) < 0 ? "bad" : "good"}">${ui.discreteMode ? "Budget" : "Cap"} ${money(capSpace(USER_TEAM_ID))}</span>
               <span class="pill ${team.cash < 0 ? "bad" : "good"}">Cash ${money(team.cash)}</span>
-              <span class="pill ${state.gm.jobSecurity < 35 ? "bad" : state.gm.jobSecurity < 55 ? "warn" : "good"}">Job ${state.gm.jobSecurity}/100</span>
+              <span class="pill ${state.gm.jobSecurity < 35 ? "bad" : state.gm.jobSecurity < 55 ? "warn" : "good"}">${ui.discreteMode ? "Review" : "Job"} ${state.gm.jobSecurity}/100</span>
+              <button class="mode-toggle" data-action="toggleDiscrete" aria-pressed="${ui.discreteMode ? "true" : "false"}">${ui.discreteMode ? "Standard" : "Discrete"}</button>
             </div>
           </div>
-          <nav class="nav-tabs">${TABS.map(([key, label]) => `<button data-tab="${key}" class="${ui.tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>
+          <nav class="nav-tabs">${TABS.map(([key, label]) => `<button data-tab="${key}" class="${ui.tab === key ? "active" : ""}">${displayTabLabel(key, label)}</button>`).join("")}</nav>
         </header>
         <main class="main">
           ${ui.toast ? `<div class="toast">${escapeHtml(ui.toast)}</div>` : ""}
@@ -3118,11 +3263,12 @@
 
   function renderLeagueHub() {
     const leagues = loadLeagueIndex();
+    const discreteClass = ui.discreteMode ? " discrete-mode" : "";
     app.innerHTML = `
-      <div class="league-hub">
+      <div class="league-hub${discreteClass}">
         <header class="hub-header">
-          <h1>Detroit Wolverines GM</h1>
-          <div>Choose a league, import a save, or generate a new clean league.</div>
+          <h1>${ui.discreteMode ? "Operations Workbook" : "Detroit Wolverines GM"}</h1>
+          <div>${ui.discreteMode ? "Choose a workbook, import data, or start a clean file." : "Choose a league, import a save, or generate a new clean league."}</div>
         </header>
         <main class="hub-main">
           ${ui.toast ? `<div class="toast">${escapeHtml(ui.toast)}</div>` : ""}
@@ -3178,10 +3324,10 @@
 
   function renderPhaseBanner() {
     const disabled = state.gm.fired ? "disabled" : "";
-    const action = state.phase === "draft" && currentPickInfo()?.ownerTeam === USER_TEAM_ID ? "On the clock" : "Advance";
+    const action = state.phase === "draft" && currentPickInfo()?.ownerTeam === USER_TEAM_ID ? (ui.discreteMode ? "Pending" : "On the clock") : (ui.discreteMode ? "Process" : "Advance");
     return `<div class="phase-banner">
-      <strong>${phaseLabel()}</strong>
-      <span class="muted">${state.gm.fired ? "Ownership has ended your tenure." : phaseCaption()}</span>
+      <strong>${displayPhaseLabel()}</strong>
+      <span class="muted">${displayPhaseCaption()}</span>
       <button class="primary" data-action="advance" ${disabled}>${action}</button>
     </div>`;
   }
@@ -3218,8 +3364,7 @@
     const team = getTeam(USER_TEAM_ID);
     const nextGame = state.schedule.find(game => game.year === state.year && !game.played && (game.homeTeamId === USER_TEAM_ID || game.awayTeamId === USER_TEAM_ID));
     const lastGame = state.schedule.slice().reverse().find(game => game.year === state.year && game.played && (game.homeTeamId === USER_TEAM_ID || game.awayTeamId === USER_TEAM_ID));
-    const offense = round(offensiveRating(team), 1);
-    const defense = round(defensiveRating(team), 1);
+    const rating = teamRatingSummary(team);
     return `
       <div class="grid two">
         <div class="grid">
@@ -3228,6 +3373,7 @@
             <div class="panel-body stack">
               <div class="metric-row">
                 <div class="metric"><label>Record</label><strong>${team.wins}-${team.losses}</strong><span>${team.conf} ${team.div}</span></div>
+                <div class="metric"><label>Team Overall</label><strong>${rating.overall}</strong><span>OFF ${rating.offense} / DEF ${rating.defense} / ST ${rating.specialTeams}</span></div>
                 <div class="metric"><label>Cap Space</label><strong>${money(capSpace(USER_TEAM_ID))}</strong><span>${money(teamCapUsed(USER_TEAM_ID))} used</span></div>
                 <div class="metric"><label>Cash</label><strong>${money(team.cash)}</strong><span>${money(team.finances.profit)} year profit</span></div>
                 <div class="metric"><label>Job Security</label><strong>${state.gm.jobSecurity}</strong><span>${team.owner.expectations}</span></div>
@@ -3239,8 +3385,9 @@
             <div class="panel-header"><h3>Unit Grades</h3></div>
             <div class="panel-body">
               <div class="metric-row">
-                <div class="metric"><label>Offense</label><strong>${offense}</strong><span>QB, skill, OL, coaching</span></div>
-                <div class="metric"><label>Defense</label><strong>${defense}</strong><span>front, coverage, coaching</span></div>
+                <div class="metric"><label>Offense</label><strong>${rating.offense}</strong><span>QB, skill, OL, coaching</span></div>
+                <div class="metric"><label>Defense</label><strong>${rating.defense}</strong><span>front, coverage, coaching</span></div>
+                <div class="metric"><label>Special Teams</label><strong>${rating.specialTeams}</strong><span>K, P, coaching</span></div>
                 <div class="metric"><label>Medical</label><strong>${team.facilities.medical}/10</strong><span>injury odds and length</span></div>
                 <div class="metric"><label>Scouting</label><strong>${team.facilities.scouting}/10</strong><span>draft accuracy</span></div>
               </div>
@@ -3271,9 +3418,9 @@
     const score = game.played ? `${game.awayScore}-${game.homeScore}` : spreadForGame(game);
     return `<div class="field-strip">
       <div class="field-content">
-        <div class="field-team"><b>${away.abbr}</b><span>${teamName(away)}</span></div>
+        <div class="field-team"><b>${away.abbr}</b><span>${teamName(away)}</span><small>${teamRatingLine(away)}</small></div>
         <div class="score">${score}</div>
-        <div class="field-team align-right"><b>${home.abbr}</b><span>${teamName(home)} - ${label}</span></div>
+        <div class="field-team align-right"><b>${home.abbr}</b><span>${teamName(home)} - ${label}</span><small>${teamRatingLine(home)}</small></div>
       </div>
     </div>`;
   }
@@ -3300,7 +3447,7 @@
     const selected = getPlayer(ui.selectedPlayerId) || players[0];
     return `
       <div class="toolbar">
-        <h2>Roster</h2>
+        <h2>${displayTabLabel("roster", "Roster")}</h2>
         <select data-control="rosterPos"><option value="ALL">All</option>${POSITIONS.map(pos => `<option value="${pos}" ${ui.rosterPos === pos ? "selected" : ""}>${pos}</option>`).join("")}</select>
       </div>
       <div class="grid two">
@@ -3316,6 +3463,12 @@
     `;
   }
 
+  function renderTradeShortcut(player) {
+    if (!player?.teamId || playerIsRetired(player)) return "";
+    const disabled = tradeDeadlinePassed() ? "disabled" : "";
+    return `<button class="mini-button" data-action="startTradeForPlayer" data-player="${player.id}" ${disabled}>Trade</button>`;
+  }
+
   function renderRosterTable(players) {
     return `<table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th>Injury</th><th>Contract</th><th class="num">Cap</th><th class="num">Release</th><th></th></tr></thead><tbody>
       ${players.map(player => {
@@ -3323,7 +3476,7 @@
         const savings = capHit(player) - dead.current;
         return `<tr>
           <td>${player.pos}</td>
-          <td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td>
+          <td><span class="inline-player-actions"><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button>${renderTradeShortcut(player)}</span></td>
           <td class="num">${player.age}</td>
           <td>${sizeLabel(player)}</td>
           <td class="num">${player.ovr}</td>
@@ -3344,7 +3497,7 @@
     const attrs = ["spd", "str", "agi", "acc", "awr", "inj", "thp", "tha", "cth", "rr", "car", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
     return `
       <div class="stack">
-        <div class="split"><div><strong>${playerName(player)}</strong><div class="muted">${player.pos} - ${playerStatus(player)} - ${player.college}</div></div><span class="pill light">${player.devTrait}</span></div>
+        <div class="split"><div><strong>${playerName(player)}</strong><div class="muted">${player.pos} - ${playerStatus(player)} - ${player.college}</div></div><span class="compact-actions"><span class="pill light">${player.devTrait}</span>${renderTradeShortcut(player)}</span></div>
         <div class="metric-row">
           <div class="metric"><label>Overall</label><strong>${player.ovr}</strong><span>Potential ${player.pot}</span></div>
           <div class="metric"><label>Age</label><strong>${player.age}</strong><span>Aging midpoint ${player.regressionAge}</span></div>
@@ -3370,7 +3523,7 @@
   function renderDepth() {
     const team = getTeam(USER_TEAM_ID);
     return `
-      <div class="toolbar"><h2>Depth Chart</h2><button data-action="autoDepth">Auto</button></div>
+      <div class="toolbar"><h2>${displayTabLabel("depth", "Depth Chart")}</h2><button data-action="autoDepth">Auto</button></div>
       <div class="depth-grid">${POSITIONS.map(pos => `
         <div class="depth-slot">
           <h3>${pos}</h3>
@@ -3391,7 +3544,7 @@
     const sorted = sortPlayers(all, ui.playerSort).slice(0, 450);
     return `
       <div class="toolbar">
-        <h2>All-Time Player Database</h2>
+        <h2>${ui.discreteMode ? "Personnel Directory" : "All-Time Player Database"}</h2>
         <input data-control="playerSearch" placeholder="Search" value="${escapeAttr(ui.playerSearch)}">
         <select data-control="playerScope">
           <option value="all" ${ui.playerScope === "all" ? "selected" : ""}>All players</option>
@@ -3424,7 +3577,7 @@
   function renderPlayerSpreadsheet(players) {
     const attrs = ["spd", "str", "agi", "acc", "awr", "inj", "sta", "tgh", "thp", "tha", "cth", "rr", "car", "trk", "pbk", "rbk", "bshed", "pmv", "fmv", "tak", "man", "zon", "prs", "kpw", "kac"];
     return `<table><thead><tr><th>Pos</th><th>Name</th><th>Status</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th>Contract</th><th class="num">Pass Yds</th><th class="num">Pass TD</th><th class="num">Rush Yds</th><th class="num">Rec Yds</th><th class="num">Sacks</th><th class="num">INT</th><th class="num">Value</th>${attrs.map(attr => `<th class="num">${attr.toUpperCase()}</th>`).join("")}</tr></thead><tbody>
-      ${players.map(player => `<tr><td>${player.pos}</td><td><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button></td><td>${playerStatus(player)}</td><td class="num">${player.age}</td><td>${sizeLabel(player)}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td>${attrs.map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr>`).join("")}
+      ${players.map(player => `<tr><td>${player.pos}</td><td><span class="inline-player-actions"><button class="link-button" data-action="selectPlayer" data-player="${player.id}">${playerName(player)}</button>${renderTradeShortcut(player)}</span></td><td>${playerStatus(player)}</td><td class="num">${player.age}</td><td>${sizeLabel(player)}</td><td class="num">${player.ovr}</td><td class="num">${player.pot}</td><td>${contractSummary(player)}</td><td class="num">${player.stats.season.passYds}</td><td class="num">${player.stats.season.passTd}</td><td class="num">${player.stats.season.rushYds}</td><td class="num">${player.stats.season.recYds}</td><td class="num">${player.stats.season.sacks}</td><td class="num">${player.stats.season.defInt}</td><td class="num">${playerTradeValue(player)}</td>${attrs.map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr>`).join("")}
     </tbody></table>`;
   }
 
@@ -3434,7 +3587,7 @@
     const selected = state.schedule.find(game => game.id === ui.selectedGameId) || games.find(game => game.played) || games[0];
     return `
       <div class="toolbar">
-        <h2>Schedule</h2>
+        <h2>${displayTabLabel("schedule", "Schedule")}</h2>
         <select data-control="scheduleWeek">${weeks.map(week => `<option value="${week}" ${Number(ui.scheduleWeek) === week ? "selected" : ""}>Week ${week}</option>`).join("")}</select>
       </div>
       <div class="grid two">
@@ -3446,7 +3599,11 @@
 
   function renderGamesTable(games) {
     return `<table><thead><tr><th>Away</th><th>Home</th><th>Weather</th><th>Spread</th><th>Result</th><th></th></tr></thead><tbody>
-      ${games.map(game => `<tr><td>${teamName(getTeam(game.awayTeamId))}</td><td>${teamName(getTeam(game.homeTeamId))}</td><td>${game.weather?.label || makeWeather(getTeam(game.homeTeamId), game.week).label}</td><td>${game.played ? "" : spreadForGame(game)}</td><td>${game.played ? `${game.awayScore}-${game.homeScore}` : "Upcoming"}</td><td><button data-action="selectGame" data-game="${game.id}">${game.played ? "Box" : "Preview"}</button></td></tr>`).join("")}
+      ${games.map(game => {
+        const away = getTeam(game.awayTeamId);
+        const home = getTeam(game.homeTeamId);
+        return `<tr><td>${renderTeamNameWithRatings(away)}</td><td>${renderTeamNameWithRatings(home)}</td><td>${game.weather?.label || makeWeather(home, game.week).label}</td><td>${game.played ? "" : spreadForGame(game)}</td><td>${game.played ? `${game.awayScore}-${game.homeScore}` : "Upcoming"}</td><td><button data-action="selectGame" data-game="${game.id}">${game.played ? "Box" : "Preview"}</button></td></tr>`;
+      }).join("")}
     </tbody></table>`;
   }
 
@@ -3456,12 +3613,16 @@
     const weather = game.weather || makeWeather(home, game.week);
     const homeProfile = gameProfile(home, away, true, weather);
     const awayProfile = gameProfile(away, home, false, weather);
+    const homeRating = teamRatingSummary(home);
+    const awayRating = teamRatingSummary(away);
     const rows = matchupRows(awayProfile, homeProfile).concat(matchupRows(homeProfile, awayProfile));
     return `<div class="stack">
       ${renderFieldGame(game, "Preview")}
       <div class="metric-row">
         <div class="metric"><label>Spread</label><strong>${spreadForGame(game)}</strong><span>home field included</span></div>
         <div class="metric"><label>Weather</label><strong>${weather.label}</strong><span>pass ${pct(weather.pass)}, rush ${pct(weather.rush)}</span></div>
+        <div class="metric"><label>${away.abbr} OVR</label><strong>${awayRating.overall}</strong><span>OFF ${awayRating.offense} / DEF ${awayRating.defense} / ST ${awayRating.specialTeams}</span></div>
+        <div class="metric"><label>${home.abbr} OVR</label><strong>${homeRating.overall}</strong><span>OFF ${homeRating.offense} / DEF ${homeRating.defense} / ST ${homeRating.specialTeams}</span></div>
         <div class="metric"><label>${away.abbr} Edge</label><strong>${round(awayProfile.marginEdge, 1)}</strong><span>holistic game rating</span></div>
         <div class="metric"><label>${home.abbr} Edge</label><strong>${round(homeProfile.marginEdge, 1)}</strong><span>holistic game rating</span></div>
       </div>
@@ -3534,8 +3695,11 @@
   }
 
   function renderConferenceStandings(conf) {
-    return `<table><thead><tr><th>Div</th><th>Team</th><th class="num">W</th><th class="num">L</th><th class="num">Pct</th><th class="num">PF</th><th class="num">PA</th><th>Strk</th></tr></thead><tbody>
-      ${["East", "North", "South", "West"].flatMap(div => state.teams.filter(team => team.conf === conf && team.div === div).sort(compareTeams).map(team => `<tr><td>${div}</td><td>${teamName(team)}</td><td class="num">${team.wins}</td><td class="num">${team.losses}</td><td class="num">${(team.wins / Math.max(1, team.wins + team.losses)).toFixed(3)}</td><td class="num">${team.pf}</td><td class="num">${team.pa}</td><td>${team.streak}</td></tr>`)).join("")}
+    return `<table><thead><tr><th>Div</th><th>Team</th><th class="num">OVR</th><th class="num">OFF</th><th class="num">DEF</th><th class="num">ST</th><th class="num">W</th><th class="num">L</th><th class="num">Pct</th><th class="num">PF</th><th class="num">PA</th><th>Strk</th></tr></thead><tbody>
+      ${["East", "North", "South", "West"].flatMap(div => state.teams.filter(team => team.conf === conf && team.div === div).sort(compareTeams).map(team => {
+        const rating = teamRatingSummary(team);
+        return `<tr><td>${div}</td><td>${teamName(team)}</td><td class="num">${rating.overall}</td><td class="num">${rating.offense}</td><td class="num">${rating.defense}</td><td class="num">${rating.specialTeams}</td><td class="num">${team.wins}</td><td class="num">${team.losses}</td><td class="num">${(team.wins / Math.max(1, team.wins + team.losses)).toFixed(3)}</td><td class="num">${team.pf}</td><td class="num">${team.pa}</td><td>${team.streak}</td></tr>`;
+      })).join("")}
     </tbody></table>`;
   }
 
@@ -3599,7 +3763,7 @@
     }).slice(0, 180);
     return `
       <div class="toolbar">
-        <h2>Draft</h2>
+        <h2>${displayTabLabel("draft", "Draft")}</h2>
         <select data-control="draftYear">${years.map(year => `<option value="${year}" ${Number(ui.draftYear) === year ? "selected" : ""}>${year}</option>`).join("")}</select>
         <select data-control="draftSort"><option value="rank" ${ui.draftSort === "rank" ? "selected" : ""}>Rank</option><option value="pot" ${ui.draftSort === "pot" ? "selected" : ""}>Potential</option><option value="ovr" ${ui.draftSort === "ovr" ? "selected" : ""}>Current</option><option value="pos" ${ui.draftSort === "pos" ? "selected" : ""}>Position</option></select>
         ${state.phase === "draft" ? `<button data-action="simPick">Sim Pick</button><button data-action="simRound">Sim Round</button>` : ""}
@@ -3697,7 +3861,7 @@
 
   function renderFreeAgency() {
     const players = state.freeAgents.slice().sort((a, b) => b.ovr - a.ovr).slice(0, 220);
-    return `<div class="toolbar"><h2>Free Agency</h2><span class="pill light">Cap ${money(capSpace(USER_TEAM_ID))}</span><span class="pill light">Roster ${teamPlayers(USER_TEAM_ID).length}/53</span></div>
+    return `<div class="toolbar"><h2>${displayTabLabel("freeAgency", "Free Agency")}</h2><span class="pill light">${ui.discreteMode ? "Budget" : "Cap"} ${money(capSpace(USER_TEAM_ID))}</span><span class="pill light">${ui.discreteMode ? "Personnel" : "Roster"} ${teamPlayers(USER_TEAM_ID).length}/53</span></div>
       ${renderRetirementPanel()}
       <section class="panel"><div class="table-wrap"><table><thead><tr><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Ask</th><th class="num">Cap After</th><th></th></tr></thead><tbody>
       ${players.map(player => {
@@ -3719,10 +3883,12 @@
     const partner = getTeam(ui.tradePartner) || state.teams.find(team => team.id !== USER_TEAM_ID);
     ui.tradePartner = partner.id;
     const preview = tradePreview();
+    const userRating = teamRatingSummary(getTeam(USER_TEAM_ID));
+    const partnerRating = teamRatingSummary(partner);
     return `
       <div class="toolbar">
-        <h2>Trades</h2>
-        <select data-control="tradePartner">${state.teams.filter(team => team.id !== USER_TEAM_ID).map(team => `<option value="${team.id}" ${ui.tradePartner === team.id ? "selected" : ""}>${teamName(team)}</option>`).join("")}</select>
+        <h2>${displayTabLabel("trades", "Trades")}</h2>
+        <select data-control="tradePartner">${state.teams.filter(team => team.id !== USER_TEAM_ID).map(team => `<option value="${team.id}" ${ui.tradePartner === team.id ? "selected" : ""}>${teamName(team)} - ${teamRatingLine(team)}</option>`).join("")}</select>
         <button class="primary" data-action="offerTrade" ${preview.accepted ? "" : "disabled"}>Offer Trade</button>
       </div>
       <section class="panel">
@@ -3733,6 +3899,8 @@
             <div class="metric"><label>${partner.abbr} Sends</label><strong>${round(preview.theirsValue, 1)}</strong><span>${Array.from(ui.tradeTheirs).length} assets</span></div>
             <div class="metric"><label>Value Gap</label><strong class="${preview.delta >= 0 ? "good" : "bad"}">${round(preview.delta, 1)}</strong><span>premium adjusted</span></div>
             <div class="metric"><label>Cap After</label><strong>${money(preview.cap.userAfter)}</strong><span>change ${money(-preview.cap.userChange)}</span></div>
+            <div class="metric"><label>DET OVR</label><strong>${userRating.overall}</strong><span>OFF ${userRating.offense} / DEF ${userRating.defense} / ST ${userRating.specialTeams}</span></div>
+            <div class="metric"><label>${partner.abbr} OVR</label><strong>${partnerRating.overall}</strong><span>OFF ${partnerRating.offense} / DEF ${partnerRating.defense} / ST ${partnerRating.specialTeams}</span></div>
           </div>
         </div>
       </section>
@@ -3748,9 +3916,9 @@
     const players = teamPlayers(teamId).sort((a, b) => b.ovr - a.ovr || POSITION_VALUE[b.pos] - POSITION_VALUE[a.pos]);
     const picks = team.draftPicks
       .filter(pickItem => pickItem.year >= state.year + 1 && pickItem.year <= state.year + 3)
-      .sort((a, b) => a.year - b.year || a.round - b.round || (a.overall || 999) - (b.overall || 999) || a.originalTeam.localeCompare(b.originalTeam));
+      .sort((a, b) => a.year - b.year || a.round - b.round || projectedOverallForPick(a) - projectedOverallForPick(b) || a.originalTeam.localeCompare(b.originalTeam));
     return `<section class="panel">
-      <div class="panel-header"><h3>${title}</h3><span class="spacer muted">${selectedSet.size} selected</span></div>
+      <div class="panel-header"><h3>${title}</h3><span class="spacer muted">${teamRatingLine(team)} - ${selectedSet.size} selected</span></div>
       <div class="trade-assets">
         <div class="asset-section-title"><strong>Roster</strong><span>${players.length} players</span></div>
         <div class="table-wrap asset-table-wrap">${renderTradeRosterAssets(players, selectedSet, side)}</div>
@@ -3790,8 +3958,8 @@
           <td><input type="checkbox" data-action="toggleAsset" data-side="${side}" data-asset="${assetId}" ${selectedSet.has(assetId) ? "checked" : ""}></td>
           <td class="num">${pickItem.year}</td>
           <td>Round ${pickItem.round}</td>
-          <td>${pickNumber ? `${pickItem.round}.${pickNumber}` : "TBD"}</td>
-          <td>${original ? `${original.abbr} (${teamName(original)})` : pickItem.originalTeam}</td>
+          <td>${pickNumber ? `${pickItem.round}.${pickNumber}` : `Proj ${pickItem.round}.${projectedPickInRound(pickItem)}`}</td>
+          <td>${original ? `<div><strong>${original.abbr}</strong><div class="muted">${teamName(original)} - ${teamRatingLine(original)}</div></div>` : pickItem.originalTeam}</td>
           <td class="num">${pickValue(pickItem)}</td>
         </tr>`;
       }).join("")}
@@ -3884,7 +4052,7 @@
       gamePassYds: "Game Passing Yards", gamePassTd: "Game Passing TD", gameRushYds: "Game Rushing Yards", gameRushTd: "Game Rushing TD", gameRecYds: "Game Receiving Yards", gameRecTd: "Game Receiving TD", gameSacks: "Game Sacks", gameDefInt: "Game Defensive INT",
       seasonPassYds: "Season Passing Yards", seasonPassTd: "Season Passing TD", seasonRushYds: "Season Rushing Yards", seasonRushTd: "Season Rushing TD", seasonRecYds: "Season Receiving Yards", seasonRecTd: "Season Receiving TD", seasonSacks: "Season Sacks", seasonDefInt: "Season Defensive INT"
     };
-    return `<div class="toolbar"><h2>Records</h2></div><div class="record-book">${Object.entries(labels).map(([key, label]) => {
+    return `<div class="toolbar"><h2>${displayTabLabel("records", "Records")}</h2></div><div class="record-book">${Object.entries(labels).map(([key, label]) => {
       const record = state.records[key];
       return `<section class="panel"><div class="panel-header"><h3>${label}</h3></div><div class="panel-body"><strong>${record.value}</strong><div class="muted">${record.player || "None"} - ${record.team || ""} - ${record.year || ""}</div></div></section>`;
     }).join("")}</div>`;
@@ -3914,6 +4082,9 @@
         <button data-action="exportSave">Export Save</button>
         <textarea data-control="importText" placeholder="Save JSON">${escapeHtml(ui.importText)}</textarea>
         <button data-action="importSave">Import Save</button>
+      </div></section>
+      <section class="panel"><div class="panel-header"><h3>Display</h3></div><div class="panel-body stack">
+        <label class="toggle-row"><input type="checkbox" data-control="discreteMode" ${ui.discreteMode ? "checked" : ""}><span>Discrete mode</span></label>
       </div></section>
       <section class="panel"><div class="panel-header"><h3>Device Access</h3></div><div class="panel-body stack">
         <div><strong>This device</strong><div class="muted">${escapeHtml(location.origin)}</div></div>
@@ -4045,7 +4216,8 @@
       ui.profileOpen = false;
       ui.tab = "roster";
       render();
-    } else if (action === "release") releasePlayer(target.dataset.player);
+    } else if (action === "startTradeForPlayer") startTradeForPlayer(target.dataset.player);
+    else if (action === "release") releasePlayer(target.dataset.player);
     else if (action === "autoDepth") {
       buildDepthChart(USER_TEAM_ID);
       save();
@@ -4080,6 +4252,11 @@
     } else if (action === "offerTrade") offerTrade();
     else if (action === "extendPlayer") extendPlayer(target.dataset.player);
     else if (action === "upgradeFacility") upgradeFacility(target.dataset.kind);
+    else if (action === "toggleDiscrete") {
+      setDiscreteMode(!ui.discreteMode);
+      await save();
+      render();
+    }
     else if (action === "manualSave") {
       save();
       ui.toast = "Saved.";
@@ -4111,7 +4288,7 @@
     }
   });
 
-  app.addEventListener("change", event => {
+  app.addEventListener("change", async event => {
     const control = event.target.closest("[data-control]");
     if (!control) return;
     const key = control.dataset.control;
@@ -4123,6 +4300,7 @@
     if (key === "scheduleWeek") ui.scheduleWeek = Number(control.value);
     if (key === "draftYear") ui.draftYear = Number(control.value);
     if (key === "draftSort") ui.draftSort = control.value;
+    if (key === "discreteMode") setDiscreteMode(control.checked);
     if (key === "tradePartner") {
       ui.tradePartner = control.value;
       ui.tradeTheirs.clear();
@@ -4130,7 +4308,7 @@
     if (key === "newLeagueName") ui.newLeagueName = control.value;
     if (key === "newLeagueMode") ui.newLeagueMode = control.value;
     if (key === "importText") ui.importText = control.value;
-    save();
+    await save();
     render();
   });
 
