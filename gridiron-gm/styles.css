@@ -925,6 +925,140 @@ button.mini-button {
   font-size: 12px;
 }
 
+.mobile-mode {
+  overflow-x: hidden;
+}
+
+.mobile-mode .main,
+.mobile-mode .hub-main {
+  width: 100%;
+  max-width: none;
+  padding: 10px;
+}
+
+.mobile-mode .brand-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+}
+
+.mobile-mode .badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.mobile-mode .brand-title h1 {
+  font-size: 16px;
+}
+
+.mobile-mode .brand-title div {
+  font-size: 11px;
+}
+
+.mobile-mode .status-strip {
+  width: 100%;
+  margin-left: 0;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.mobile-mode .pill {
+  min-height: 24px;
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.mobile-mode .mode-toggle {
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.mobile-mode .nav-tabs {
+  padding: 0 6px;
+}
+
+.mobile-mode .nav-tabs button {
+  min-height: 38px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.mobile-mode .grid.two,
+.mobile-mode .grid.three,
+.mobile-mode .asset-grid {
+  grid-template-columns: 1fr;
+}
+
+.mobile-mode .metric-row {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
+.mobile-mode .metric {
+  min-height: 64px;
+  padding: 8px;
+}
+
+.mobile-mode .metric strong {
+  font-size: 18px;
+}
+
+.mobile-mode .toolbar {
+  align-items: stretch;
+}
+
+.mobile-mode .toolbar h2 {
+  width: 100%;
+}
+
+.mobile-mode .toolbar select,
+.mobile-mode .toolbar button,
+.mobile-mode .filter-row select,
+.mobile-mode .filter-row input {
+  max-width: 100%;
+}
+
+.mobile-mode table {
+  font-size: 12px;
+}
+
+.mobile-mode th,
+.mobile-mode td {
+  padding: 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mobile-mode .num,
+.mobile-mode .nowrap {
+  white-space: nowrap;
+}
+
+.mobile-mode .table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-mode .asset-table-wrap {
+  max-height: 58vh;
+}
+
+.mobile-mode .modal-backdrop {
+  padding: 8px;
+  align-items: stretch;
+}
+
+.mobile-mode .modal {
+  max-height: calc(100vh - 16px);
+}
+
+.mobile-mode .league-row {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+
 @media (max-width: 980px) {
   .brand-row {
     align-items: flex-start;

@@ -5,6 +5,7 @@
   const LEAGUE_INDEX_KEY = "gridiron-gm-league-index-v1";
   const LEAGUE_SAVE_PREFIX = "gridiron-gm-league-";
   const DISCRETE_MODE_KEY = "gridiron-gm-discrete-mode";
+  const MOBILE_MODE_KEY = "gridiron-gm-mobile-mode";
   const DB_NAME = "gridiron-gm-db-v1";
   const DB_STORE = "leagues";
   const CURRENT_YEAR = 2026;
@@ -261,6 +262,7 @@
 
   const app = document.getElementById("app");
   let state = null;
+  let nflContractLookupCache = null;
   let ui = {
     screen: "hub",
     tab: "dashboard",
@@ -285,7 +287,8 @@
     newLeagueMode: "standard",
     newLeagueNflSetup: "real",
     importText: "",
-    discreteMode: loadDiscreteModePreference()
+    discreteMode: loadDiscreteModePreference(),
+    mobileMode: loadMobileModePreference()
   };
 
   function clamp(value, min, max) {
@@ -636,6 +639,12 @@
     const idx = currentYearIndex(player);
     if (idx < 0) return "Expired";
     return `${player.contract.years - idx}y/${money(remainingContractValue(player))}`;
+  }
+
+  function renderRealContractDetails(player) {
+    const real = player.contract?.real;
+    if (!real) return "";
+    return `<div><strong>Real Contract</strong><div class="muted">${real.source}: ${money(real.totalValue)} total, ${money(real.apy)} APY, ${money(real.totalGuaranteed)} guaranteed</div></div>`;
   }
 
   function blankStats() {
@@ -1109,6 +1118,106 @@
     return POSITIONS.includes(key) ? key : (NFL_POSITION_MAP[key] || "LB");
   }
 
+  function normalizeNflContractName(name) {
+    return String(name || "")
+      .toLowerCase()
+      .replace(/\bmatthew\b/g, "matt")
+      .replace(/\bnicholas\b/g, "nick")
+      .replace(/\bchristopher\b/g, "chris")
+      .replace(/\bjoshua\b/g, "josh")
+      .replace(/\bwilliam\b/g, "will")
+      .replace(/\bkenneth\b/g, "kenny")
+      .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "")
+      .replace(/[^a-z]/g, "");
+  }
+
+  function addUniqueContractLookup(map, key, contract) {
+    if (!key) return;
+    if (map.has(key)) map.set(key, null);
+    else map.set(key, contract);
+  }
+
+  function nflContractLookup() {
+    const data = nflModeData();
+    if (nflContractLookupCache?.source === data) return nflContractLookupCache.lookup;
+    const lookup = {
+      exactByTeam: new Map(),
+      exactAnyByPos: new Map(),
+      lastByTeamPos: new Map()
+    };
+    for (const contract of data?.contracts || []) {
+      const normalized = normalizeNflContractName(contract.player);
+      const team = contract.team;
+      const pos = mapNflPosition(contract.pos);
+      if (!normalized || !team) continue;
+      lookup.exactByTeam.set(`${normalized}|${team}`, contract);
+      addUniqueContractLookup(lookup.exactAnyByPos, `${normalized}|${pos}`, contract);
+      const parts = String(contract.player || "").trim().split(/\s+/);
+      const last = normalizeNflContractName(parts.slice(1).join(" ") || parts[0]);
+      addUniqueContractLookup(lookup.lastByTeamPos, `${last}|${team}|${pos}`, contract);
+    }
+    nflContractLookupCache = { source: data, lookup };
+    return lookup;
+  }
+
+  function realNflContractForSource(source, pos) {
+    const teamId = mapNflTeam(source.team);
+    const normalized = normalizeNflContractName(`${source.firstName || ""} ${source.lastName || ""}`);
+    const last = normalizeNflContractName(source.lastName || "");
+    const contractPos = mapNflPosition(source.pos || pos);
+    const lookup = nflContractLookup();
+    const contractData =
+      lookup.exactByTeam.get(`${normalized}|${teamId}`) ||
+      lookup.lastByTeamPos.get(`${last}|${teamId}|${contractPos}`) ||
+      lookup.exactAnyByPos.get(`${normalized}|${contractPos}`);
+    return makeRealNflContract(contractData, contractPos);
+  }
+
+  function makeRealNflContract(contractData, pos) {
+    if (!contractData) return null;
+    const total = round((contractData.totalValue || 0) / 1000000, 2);
+    const apy = round((contractData.apy || 0) / 1000000, 2);
+    const totalGuaranteed = round((contractData.totalGuaranteed || 0) / 1000000, 2);
+    if (total <= 0 || apy <= 0) return null;
+    const years = Math.max(1, Math.min(10, Math.round(total / apy)));
+    const modeledGuarantee = Math.min(total, Math.max(0, totalGuaranteed));
+    const signingBonus = round(Math.min(total * 0.36, modeledGuarantee * 0.58), 2);
+    const salaryTotal = round(Math.max(0, total - signingBonus), 2);
+    let weightTotal = 0;
+    for (let i = 0; i < years; i += 1) weightTotal += 0.94 + i * 0.06;
+    const salaries = [];
+    for (let i = 0; i < years; i += 1) salaries.push(round(salaryTotal * (0.94 + i * 0.06) / weightTotal, 2));
+    const guaranteed = Array.from({ length: years }, () => 0);
+    let guaranteeLeft = round(Math.max(0, modeledGuarantee - signingBonus), 2);
+    for (let i = 0; i < years && guaranteeLeft > 0; i += 1) {
+      const value = Math.min(salaries[i], guaranteeLeft);
+      guaranteed[i] = round(value, 2);
+      guaranteeLeft = round(guaranteeLeft - value, 2);
+    }
+    return {
+      startYear: state.year,
+      years,
+      salaries,
+      signingBonus,
+      bonusYears: Math.min(years, 5),
+      guaranteed,
+      real: {
+        source: "Over the Cap",
+        sourceUrl: "https://overthecap.com/contracts",
+        player: contractData.player,
+        team: contractData.team,
+        pos: contractData.pos || pos,
+        totalValue: total,
+        apy,
+        totalGuaranteed
+      }
+    };
+  }
+
+  function cloneContract(contract) {
+    return contract ? JSON.parse(JSON.stringify(contract)) : null;
+  }
+
   function maddenStat(stats, key, fallback = 50) {
     const value = stats?.[key];
     return Number.isFinite(value) ? Number(value) : fallback;
@@ -1195,6 +1304,7 @@
       longevity: clamp((ratings.inj || 75) / 110 + gaussian(0, 0.1), 0.05, 0.98)
     };
     const body = source.height && source.weight ? { height: source.height, weight: source.weight } : makeBody(pos);
+    const realContract = realNflContractForSource(source, pos);
     return {
       id: id("p", "nextPlayerId"),
       firstName: source.firstName || "Unknown",
@@ -1215,7 +1325,8 @@
       devTrait: nflDevTrait(source, ovr, pot),
       regressionAge: generateRegressionAge(pos, hidden.longevity),
       injury: { status: "Healthy", weeks: 0, history: [], prone: nflInjuryProne(pos, ratings.inj) },
-      contract: teamId ? makeContract(pos, ovr, pot, source.age || 25) : null,
+      contract: teamId ? (cloneContract(realContract) || makeContract(pos, ovr, pot, source.age || 25)) : null,
+      realContract: realContract ? cloneContract(realContract) : null,
       stats: { season: blankStats(), career: blankStats(), history: [] },
       awards: [],
       morale: randInt(48, 86),
@@ -1241,7 +1352,6 @@
     } else {
       loadNflCurrentTeams(sources);
       refreshTeamTargetsFromRosters();
-      for (const team of state.teams) assignStarterContracts(team.id);
     }
     for (const team of state.teams) buildDepthChart(team.id);
   }
@@ -1279,7 +1389,7 @@
         const player = selectNflLeagueDraftPlayer(pool, team.id);
         if (!player) continue;
         player.teamId = team.id;
-        player.contract = makeContract(player.pos, player.ovr, player.pot, player.age);
+        player.contract = cloneContract(player.realContract) || makeContract(player.pos, player.ovr, player.pot, player.age);
         state.players.push(player);
         rosterCounts[team.id] += 1;
       }
@@ -1324,7 +1434,7 @@
     const team = getTeam(pickInfo.ownerTeam);
     if (!player || !team || teamPlayers(team.id).length >= MAX_ROSTER) return;
     player.teamId = team.id;
-    player.contract = makeContract(player.pos, player.ovr, player.pot, player.age);
+    player.contract = cloneContract(player.realContract) || makeContract(player.pos, player.ovr, player.pot, player.age);
     state.freeAgents = state.freeAgents.filter(item => item.id !== player.id);
     state.players.push(player);
     state.currentLeagueDraft.selections.push({ overall: pickInfo.overall, round: pickInfo.round, pick: pickInfo.pickInRound, teamId: team.id, playerId: player.id, name: playerName(player), pos: player.pos, ovr: player.ovr });
@@ -1404,7 +1514,6 @@
     state.week = 1;
     for (const team of state.teams) {
       buildDepthChart(team.id);
-      assignStarterContracts(team.id);
     }
     refreshTeamTargetsFromRosters();
     addNews("League draft complete", "Rosters are full. Week 1 is ready.");
@@ -2044,6 +2153,27 @@
     saveDiscreteModePreference(ui.discreteMode);
   }
 
+  function loadMobileModePreference() {
+    try {
+      return localStorage.getItem(MOBILE_MODE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function saveMobileModePreference(value) {
+    try {
+      localStorage.setItem(MOBILE_MODE_KEY, value ? "1" : "0");
+    } catch {
+      // League saves still retain the UI setting when localStorage is unavailable.
+    }
+  }
+
+  function setMobileMode(value) {
+    ui.mobileMode = !!value;
+    saveMobileModePreference(ui.mobileMode);
+  }
+
   function save() {
     if (!state) return Promise.resolve();
     state.updatedAt = Date.now();
@@ -2067,6 +2197,7 @@
     state = null;
     ui.screen = "hub";
     ui.discreteMode = loadDiscreteModePreference();
+    ui.mobileMode = loadMobileModePreference();
   }
 
   async function migrateLegacySave() {
@@ -2108,7 +2239,8 @@
         toast: "",
         profileOpen: false,
         prospectProfileOpen: false,
-        discreteMode: loadDiscreteModePreference()
+        discreteMode: loadDiscreteModePreference(),
+        mobileMode: loadMobileModePreference()
       };
       migrateState();
       await save();
@@ -3672,22 +3804,95 @@
     return round(value * (0.78 ** yearGap), 1);
   }
 
+  function playerReplacementLevel(pos) {
+    return { QB: 66, RB: 66, WR: 67, TE: 66, T: 67, OG: 66, C: 66, DE: 67, DT: 66, LB: 66, CB: 67, S: 66, K: 73, P: 73 }[pos] || 66;
+  }
+
+  function tradeProductionScore(player, stats) {
+    if (!stats) return 0;
+    if (player.pos === "QB") return stats.passYds / 120 + stats.passTd * 8 - stats.int * 5 + stats.rushYds / 45 + stats.rushTd * 5;
+    if (player.pos === "RB") return stats.rushYds / 16 + stats.rushTd * 8 + stats.recYds / 26 + stats.recTd * 6;
+    if (player.pos === "WR" || player.pos === "TE") return stats.recYds / 14 + stats.recTd * 8 + stats.rushYds / 32 + stats.rushTd * 5;
+    if (player.pos === "DE" || player.pos === "DT" || player.pos === "LB") return stats.sacks * 18 + stats.tfl * 5 + stats.tackles * 0.4 + stats.defInt * 8 + stats.ff * 10;
+    if (player.pos === "CB" || player.pos === "S") return stats.defInt * 22 + stats.tackles * 0.3 + stats.sacks * 10 + stats.tfl * 4 + stats.ff * 10;
+    if (player.pos === "K") return stats.fg * 3 + stats.xp * 0.4 - Math.max(0, stats.fga - stats.fg) * 2;
+    if (player.pos === "P") return Math.max(0, stats.pAvg - 40) * 4 + stats.punts * 0.08;
+    return 0;
+  }
+
+  function tradeProductionValue(player) {
+    const current = tradeProductionScore(player, player.stats.season);
+    const history = (player.stats.history || []).slice(-3).reverse().reduce((sum, row, index) => sum + tradeProductionScore(player, row) * (0.55 ** (index + 1)), 0);
+    return clamp((current + history) * 1.4, 0, 520);
+  }
+
   function playerTradeValue(player) {
     if (playerIsRetired(player)) return 0;
-    const agePeak = REGRESSION_AGES[player.pos] - 3;
-    const ageFactor = clamp(1.2 - Math.max(0, player.age - agePeak) * 0.08 + Math.max(0, 24 - player.age) * 0.035, 0.28, 1.35);
-    const ability = Math.max(0, player.ovr - 52) ** 2.05 * 0.48 * POSITION_VALUE[player.pos];
-    const potential = Math.max(0, player.pot - player.ovr) * 18 * POSITION_VALUE[player.pos];
-    const awards = player.awards.filter(award => state.year - award.year <= 4).reduce((sum, award) => sum + ({ MVP: 220, "All-Pro": 120, "Pro Bowl": 45, DPOY: 180, OPOY: 180, OROY: 80, DROY: 80, "SB MVP": 110 }[award.award] || 20), 0);
-    const production = allProScore(player) * 2.2;
-    const injuryPenalty = player.injury.history.reduce((sum, injury) => sum + injury.weeks, 0) * 4.2;
-    const surplus = Math.max(-400, (marketAnnual(player) - avgRemainingSalary(player)) * 28);
-    const value = (ability + potential + awards + production + surplus - injuryPenalty) * ageFactor;
-    return round(clamp(value, player.pos === "K" || player.pos === "P" ? 1 : 8, 4800), 1);
+    const posValue = POSITION_VALUE[player.pos] || 1;
+    const replacement = playerReplacementLevel(player.pos);
+    const quality = Math.max(0, player.ovr - replacement);
+    const starterQuality = Math.max(0, player.ovr - 72);
+    const eliteQuality = Math.max(0, player.ovr - 88);
+    const ability = (quality ** 2 * 1.15 + starterQuality ** 1.85 * 4.6 + eliteQuality ** 2 * 8.5) * posValue;
+    const upsideGap = Math.max(0, player.pot - Math.max(player.ovr, replacement + 2));
+    const youth = clamp((28 - player.age) / 6, 0, 1.15);
+    const potential = upsideGap ** 1.55 * 7.2 * posValue * youth;
+    const regressionAge = player.regressionAge || REGRESSION_AGES[player.pos] || 30;
+    const yearsToRegression = regressionAge - player.age;
+    const ageFactor = clamp(0.92 + Math.min(5, yearsToRegression) * 0.045 - Math.max(0, -yearsToRegression) * 0.16, 0.22, 1.18);
+    const awards = player.awards.filter(award => state.year - award.year <= 4).reduce((sum, award) => sum + ({ MVP: 320, "All-Pro": 170, "Pro Bowl": 60, DPOY: 230, OPOY: 230, OROY: 95, DROY: 95, "SB MVP": 150 }[award.award] || 18), 0);
+    const production = tradeProductionValue(player);
+    const injuryPenalty = player.injury.history.reduce((sum, injury) => sum + injury.weeks, 0) * 6.8;
+    const salaryDelta = currentYearIndex(player) >= 0 ? marketAnnual(player) - avgRemainingSalary(player) : 0;
+    const surplusWeight = player.ovr >= 84 ? 15 : player.ovr >= 76 ? 8 : player.ovr >= 70 ? 3 : 0.8;
+    const surplus = clamp(salaryDelta * surplusWeight, -480, player.ovr >= 84 ? 650 : 220);
+    let value = (ability + potential + awards + production + surplus - injuryPenalty) * ageFactor;
+    if (player.ovr < 68 && player.pot < 76) value *= 0.35;
+    if (player.ovr < 72 && player.age >= 27) value *= 0.55;
+    if (player.pos === "K" || player.pos === "P") value *= 0.24;
+    return round(clamp(value, 0, player.pos === "K" || player.pos === "P" ? 140 : 4800), 1);
   }
 
   function marketAnnual(player) {
     return projectedAnnual(player);
+  }
+
+  function receivingTeamFitMultiplier(player, receivingTeamId) {
+    const profile = positionGroupProfile(receivingTeamId, player.pos);
+    const starterUpgrade = player.ovr - profile.starterAvg;
+    const depthUpgrade = player.ovr - profile.depthAvg;
+    let factor = 0.72 + Math.min(0.28, profile.shortage * 0.08);
+    factor += clamp(starterUpgrade / 28, -0.2, 0.33);
+    factor += clamp(depthUpgrade / 32, -0.18, 0.18);
+    if (profile.shortage <= 0 && player.ovr <= profile.depthAvg) factor *= player.ovr < 74 ? 0.45 : 0.7;
+    if (profile.count >= profile.targetCount && player.ovr < 72) factor *= 0.45;
+    return clamp(factor, 0.15, 1.22);
+  }
+
+  function tradePackageValue(assetIds, receivingTeamId) {
+    let pickTotal = 0;
+    const playerValues = [];
+    for (const assetId of assetIds) {
+      const asset = parseAsset(assetId);
+      if (!asset) continue;
+      if (asset.type === "player") {
+        const player = getPlayer(asset.playerId);
+        if (!player) continue;
+        const base = playerTradeValue(player);
+        playerValues.push({ base, adjusted: base * receivingTeamFitMultiplier(player, receivingTeamId) });
+      } else {
+        const pickAsset = findPickAsset(asset);
+        if (pickAsset) pickTotal += pickValue(pickAsset);
+      }
+    }
+    playerValues.sort((a, b) => b.adjusted - a.adjusted);
+    const playerTotal = playerValues.reduce((sum, item, index) => {
+      let multiplier = index === 0 ? 1 : index === 1 ? 0.82 : index === 2 ? 0.66 : index < 6 ? 0.48 : index < 10 ? 0.32 : 0.18;
+      if (item.base < 75) multiplier *= index < 2 ? 0.55 : 0.22;
+      else if (item.base < 180) multiplier *= index < 4 ? 0.75 : 0.4;
+      return sum + item.adjusted * multiplier;
+    }, 0);
+    return round(pickTotal + playerTotal, 1);
   }
 
   function parseAsset(assetId) {
@@ -3741,13 +3946,29 @@
   function tradePreview() {
     const mine = Array.from(ui.tradeMine);
     const theirs = Array.from(ui.tradeTheirs);
-    const mineValue = mine.reduce((sum, asset) => sum + assetValue(asset), 0);
-    const theirsValue = theirs.reduce((sum, asset) => sum + assetValue(asset), 0);
     const partner = getTeam(ui.tradePartner);
+    const mineValue = tradePackageValue(mine, partner.id);
+    const theirsValue = tradePackageValue(theirs, USER_TEAM_ID);
     const aiNeedPremium = 1.03 + (partner.wins >= 8 ? 0.04 : 0) + (state.phase === "draft" ? -0.02 : 0);
     const cap = previewTradeCap(USER_TEAM_ID, partner.id, mine, theirs);
-    const accepted = mineValue >= theirsValue * aiNeedPremium && cap.userAfter >= -1 && cap.partnerAfter >= -8;
-    return { mineValue, theirsValue, delta: round(mineValue - theirsValue * aiNeedPremium, 1), accepted, cap };
+    const roster = previewTradeRoster(USER_TEAM_ID, partner.id, mine, theirs);
+    const accepted = mineValue >= theirsValue * aiNeedPremium && cap.userAfter >= -1 && cap.partnerAfter >= -8 && roster.userAfter <= MAX_ROSTER + 3 && roster.partnerAfter <= MAX_ROSTER + 3;
+    return { mineValue, theirsValue, delta: round(mineValue - theirsValue * aiNeedPremium, 1), accepted, cap, roster };
+  }
+
+  function countPlayerAssets(assetIds) {
+    return assetIds.reduce((sum, assetId) => parseAsset(assetId)?.type === "player" ? sum + 1 : sum, 0);
+  }
+
+  function previewTradeRoster(userTeamId, partnerTeamId, userAssets, partnerAssets) {
+    const userSends = countPlayerAssets(userAssets);
+    const userReceives = countPlayerAssets(partnerAssets);
+    const partnerSends = userReceives;
+    const partnerReceives = userSends;
+    return {
+      userAfter: teamPlayers(userTeamId).length - userSends + userReceives,
+      partnerAfter: teamPlayers(partnerTeamId).length - partnerSends + partnerReceives
+    };
   }
 
   function previewTradeCap(userTeamId, partnerTeamId, userAssets, partnerAssets) {
@@ -3780,14 +4001,20 @@
   function offerTrade() {
     const preview = tradePreview();
     if (!preview.accepted) {
-      ui.toast = `Offer short by about ${round(Math.abs(preview.delta), 1)} value points or cap room.`;
+      const rosterBlocked = preview.roster.userAfter > MAX_ROSTER + 3 || preview.roster.partnerAfter > MAX_ROSTER + 3;
+      const capBlocked = preview.cap.userAfter < -1 || preview.cap.partnerAfter < -8;
+      ui.toast = rosterBlocked
+        ? "Trade rejected because one roster would be too far over 53 players."
+        : capBlocked
+          ? "Trade rejected by cap room."
+          : `Offer short by about ${round(Math.abs(preview.delta), 1)} value points.`;
       render();
       return;
     }
     const partnerId = ui.tradePartner;
     const mine = Array.from(ui.tradeMine).map(assetLabel).join(", ") || "nothing";
     const theirs = Array.from(ui.tradeTheirs).map(assetLabel).join(", ") || "nothing";
-    if (!confirmAction(`Offer this trade?\n\nDetroit sends: ${mine}\n\n${getTeam(partnerId).abbr} sends: ${theirs}\n\nDetroit cap after: ${money(preview.cap.userAfter)}`)) return;
+    if (!confirmAction(`Offer this trade?\n\nDetroit sends: ${mine}\n\n${getTeam(partnerId).abbr} sends: ${theirs}\n\nDetroit cap after: ${money(preview.cap.userAfter)} (${money(-preview.cap.userChange)} change)\n${getTeam(partnerId).abbr} cap after: ${money(preview.cap.partnerAfter)} (${money(-preview.cap.partnerChange)} change)`)) return;
     executeTrade(USER_TEAM_ID, partnerId, Array.from(ui.tradeMine), Array.from(ui.tradeTheirs));
     ui.tradeMine.clear();
     ui.tradeTheirs.clear();
@@ -3929,12 +4156,13 @@
     }
     const team = getTeam(USER_TEAM_ID);
     const discreteClass = ui.discreteMode ? " discrete-mode" : "";
+    const mobileClass = ui.mobileMode ? " mobile-mode" : "";
     const shellTitle = ui.discreteMode ? "Operations Workbook" : "Detroit Wolverines GM";
     const shellSubtitle = ui.discreteMode
       ? `${state.year} - ${displayPhaseLabel()} - Portfolio ${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}`
       : `${state.year} - ${phaseLabel()} - ${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ""}`;
     app.innerHTML = `
-      <div class="shell${discreteClass}">
+      <div class="shell${discreteClass}${mobileClass}">
         <header class="topbar">
           <div class="brand-row">
             <div class="badge">${ui.discreteMode ? "OPS" : "DW"}</div>
@@ -3948,6 +4176,7 @@
               <span class="pill ${team.cash < 0 ? "bad" : "good"}">Cash ${money(team.cash)}</span>
               <span class="pill ${state.gm.jobSecurity < 35 ? "bad" : state.gm.jobSecurity < 55 ? "warn" : "good"}">${ui.discreteMode ? "Review" : "Job"} ${state.gm.jobSecurity}/100</span>
               <button class="mode-toggle" data-action="toggleDiscrete" aria-pressed="${ui.discreteMode ? "true" : "false"}">${ui.discreteMode ? "Standard" : "Discrete"}</button>
+              <button class="mode-toggle" data-action="toggleMobile" aria-pressed="${ui.mobileMode ? "true" : "false"}">${ui.mobileMode ? "Desktop" : "Mobile"}</button>
             </div>
           </div>
           <nav class="nav-tabs">${TABS.map(([key, label]) => `<button data-tab="${key}" class="${ui.tab === key ? "active" : ""}">${displayTabLabel(key, label)}</button>`).join("")}</nav>
@@ -3965,8 +4194,9 @@
   function renderLeagueHub() {
     const leagues = loadLeagueIndex();
     const discreteClass = ui.discreteMode ? " discrete-mode" : "";
+    const mobileClass = ui.mobileMode ? " mobile-mode" : "";
     app.innerHTML = `
-      <div class="league-hub${discreteClass}">
+      <div class="league-hub${discreteClass}${mobileClass}">
         <header class="hub-header">
           <h1>${ui.discreteMode ? "Operations Workbook" : "Detroit Wolverines GM"}</h1>
           <div>${ui.discreteMode ? "Choose a workbook, import data, or start a clean file." : "Choose a league, import a save, or generate a new clean league."}</div>
@@ -4213,6 +4443,7 @@
           <div class="metric"><label>Trade Value</label><strong>${playerTradeValue(player)}</strong><span>contract adjusted</span></div>
           <div class="metric"><label>Cap Hit</label><strong>${money(currentCap)}</strong><span>${contractSummary(player)}</span></div>
         </div>
+        ${renderRealContractDetails(player)}
         <div class="table-wrap"><table><thead><tr><th>Stat</th><th class="num">Season</th><th class="num">Career</th></tr></thead><tbody>${renderStatRows(player)}</tbody></table></div>
         <div class="table-wrap"><table><thead><tr><th>Attr</th>${attrs.slice(0, 11).map(attr => `<th class="num">${attr.toUpperCase()}</th>`).join("")}</tr></thead><tbody><tr><td>Ratings</td>${attrs.slice(0, 11).map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr><tr><td>Skills</td>${attrs.slice(11).map(attr => `<td class="num">${player.ratings[attr] || ""}</td>`).join("")}</tr></tbody></table></div>
         ${player.madden?.abilities?.length ? `<div><strong>Madden Abilities</strong><div class="muted">${player.madden.abilities.slice(0, 8).join(", ")}</div></div>` : ""}
@@ -4664,6 +4895,9 @@
   }
 
   function renderTradePreviewPanel(preview, partner, userRating, partnerRating) {
+    const userCapDelta = round(-preview.cap.userChange, 2);
+    const partnerCapDelta = round(-preview.cap.partnerChange, 2);
+    const rosterClass = preview.roster.userAfter <= MAX_ROSTER + 3 && preview.roster.partnerAfter <= MAX_ROSTER + 3 ? "" : "bad";
     return `<section class="panel" data-trade-preview>
       <div class="panel-header"><h3>Preview</h3><span class="spacer ${preview.accepted ? "good" : "bad"}">${preview.accepted ? "Likely accepted" : "Needs more value"}</span></div>
       <div class="panel-body">
@@ -4671,7 +4905,9 @@
           <div class="metric"><label>Detroit Sends</label><strong>${round(preview.mineValue, 1)}</strong><span>${ui.tradeMine.size} assets</span></div>
           <div class="metric"><label>${partner.abbr} Sends</label><strong>${round(preview.theirsValue, 1)}</strong><span>${ui.tradeTheirs.size} assets</span></div>
           <div class="metric"><label>Value Gap</label><strong class="${preview.delta >= 0 ? "good" : "bad"}">${round(preview.delta, 1)}</strong><span>premium adjusted</span></div>
-          <div class="metric"><label>Cap After</label><strong>${money(preview.cap.userAfter)}</strong><span>change ${money(-preview.cap.userChange)}</span></div>
+          <div class="metric"><label>DET Cap Impact</label><strong class="${userCapDelta >= 0 ? "good" : "bad"}">${money(userCapDelta)}</strong><span>${money(capSpace(USER_TEAM_ID))} to ${money(preview.cap.userAfter)}</span></div>
+          <div class="metric"><label>${partner.abbr} Cap Impact</label><strong class="${partnerCapDelta >= 0 ? "good" : "bad"}">${money(partnerCapDelta)}</strong><span>${money(capSpace(partner.id))} to ${money(preview.cap.partnerAfter)}</span></div>
+          <div class="metric"><label>Roster After</label><strong class="${rosterClass}">DET ${preview.roster.userAfter} / ${partner.abbr} ${preview.roster.partnerAfter}</strong><span>53 active target</span></div>
           <div class="metric"><label>DET OVR</label><strong>${userRating.overall}</strong><span>OFF ${userRating.offense} / DEF ${userRating.defense} / ST ${userRating.specialTeams}</span></div>
           <div class="metric"><label>${partner.abbr} OVR</label><strong>${partnerRating.overall}</strong><span>OFF ${partnerRating.offense} / DEF ${partnerRating.defense} / ST ${partnerRating.specialTeams}</span></div>
         </div>
@@ -4715,11 +4951,16 @@
     </section>`;
   }
 
+  function tradePlayerDetroitCapDelta(player, side) {
+    return round(side === "mine" ? capHit(player) - deadCapIfTrade(player) : -capHit(player), 2);
+  }
+
   function renderTradeRosterAssets(players, selectedSet, side) {
-    return `<table class="asset-table"><thead><tr><th></th><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Cap</th><th class="num">Value</th></tr></thead><tbody>
+    return `<table class="asset-table"><thead><tr><th></th><th>Pos</th><th>Name</th><th class="num">Age</th><th>Ht/Wt</th><th class="num">Ovr</th><th class="num">Pot</th><th class="num">Cap</th><th class="num">DET Cap</th><th class="num">Value</th></tr></thead><tbody>
       ${players.map(player => {
         const assetId = `player:${player.id}`;
         const disabled = tradeDeadlinePassed() ? "disabled" : "";
+        const capDelta = tradePlayerDetroitCapDelta(player, side);
         return `<tr>
           <td><input type="checkbox" data-action="toggleAsset" data-side="${side}" data-asset="${assetId}" ${selectedSet.has(assetId) ? "checked" : ""} ${disabled}></td>
           <td>${player.pos}</td>
@@ -4729,6 +4970,7 @@
           <td class="num">${player.ovr}</td>
           <td class="num">${player.pot}</td>
           <td class="num">${money(capHit(player))}</td>
+          <td class="num ${capDelta >= 0 ? "good" : "bad"}">${money(capDelta)}</td>
           <td class="num">${playerTradeValue(player)}</td>
         </tr>`;
       }).join("")}
@@ -4872,6 +5114,7 @@
       </div></section>
       <section class="panel"><div class="panel-header"><h3>Display</h3></div><div class="panel-body stack">
         <label class="toggle-row"><input type="checkbox" data-control="discreteMode" ${ui.discreteMode ? "checked" : ""}><span>Discrete mode</span></label>
+        <label class="toggle-row"><input type="checkbox" data-control="mobileMode" ${ui.mobileMode ? "checked" : ""}><span>Mobile mode</span></label>
       </div></section>
       <section class="panel"><div class="panel-header"><h3>Device Access</h3></div><div class="panel-body stack">
         <div><strong>This device</strong><div class="muted">${escapeHtml(location.origin)}</div></div>
@@ -5041,6 +5284,11 @@
       await save();
       render();
     }
+    else if (action === "toggleMobile") {
+      setMobileMode(!ui.mobileMode);
+      await save();
+      render();
+    }
     else if (action === "manualSave") {
       save();
       ui.toast = "Saved.";
@@ -5085,6 +5333,7 @@
     if (key === "draftYear") ui.draftYear = Number(control.value);
     if (key === "draftSort") ui.draftSort = control.value;
     if (key === "discreteMode") setDiscreteMode(control.checked);
+    if (key === "mobileMode") setMobileMode(control.checked);
     if (key === "tradePartner") {
       ui.tradePartner = control.value;
       ui.tradeTheirs.clear();
