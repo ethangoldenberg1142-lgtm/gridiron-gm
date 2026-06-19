@@ -263,7 +263,6 @@
   const app = document.getElementById("app");
   let state = null;
   let nflContractLookupCache = null;
-  let tradeValueCache = null;
   let ui = {
     screen: "hub",
     tab: "dashboard",
@@ -3823,68 +3822,140 @@
     return clamp((current + history) * 1.4, 0, 520);
   }
 
-  function footballGmRatingContext() {
-    const players = allKnownPlayers().filter(player => !playerIsRetired(player));
-    const ratings = players.flatMap(player => [player.ovr, player.pot]).filter(Number.isFinite);
-    const mean = ratings.length ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : 70;
-    const variance = ratings.length ? ratings.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / ratings.length : 100;
-    return { mean, std: Math.max(1, Math.sqrt(variance)) };
+  const TRADE_REPLACEMENT_LEVEL = {
+    QB: 74, RB: 70, WR: 72, TE: 71, T: 72, OG: 71, C: 71,
+    DE: 72, DT: 72, LB: 71, CB: 72, S: 71, K: 78, P: 78
+  };
+
+  const TRADE_POSITION_MODEL = {
+    QB: { mult: 6.35, exp: 2.13, cap: 7200, contract: 18, surplusCap: 1650, badContract: 2300, production: 11, potential: 31, eliteFloor: 3300 },
+    RB: { mult: 2.0, exp: 1.8, cap: 1450, contract: 8, surplusCap: 500, badContract: 650, production: 8, potential: 8, eliteFloor: 650 },
+    WR: { mult: 2.75, exp: 2.03, cap: 2700, contract: 13, surplusCap: 850, badContract: 900, production: 8, potential: 13, eliteFloor: 1550 },
+    TE: { mult: 1.65, exp: 1.96, cap: 1650, contract: 9, surplusCap: 600, badContract: 650, production: 6, potential: 10, eliteFloor: 900 },
+    T: { mult: 2.95, exp: 2.0, cap: 3100, contract: 12, surplusCap: 850, badContract: 850, production: 3, potential: 11, eliteFloor: 1800 },
+    OG: { mult: 1.55, exp: 1.88, cap: 1550, contract: 8, surplusCap: 550, badContract: 600, production: 2, potential: 7, eliteFloor: 850 },
+    C: { mult: 1.5, exp: 1.88, cap: 1500, contract: 8, surplusCap: 525, badContract: 575, production: 2, potential: 7, eliteFloor: 800 },
+    DE: { mult: 3.25, exp: 2.05, cap: 3400, contract: 13, surplusCap: 900, badContract: 950, production: 8, potential: 12, eliteFloor: 1900 },
+    DT: { mult: 2.25, exp: 2.02, cap: 2550, contract: 11, surplusCap: 750, badContract: 800, production: 7, potential: 10, eliteFloor: 1350 },
+    LB: { mult: 1.85, exp: 1.96, cap: 1800, contract: 8, surplusCap: 575, badContract: 625, production: 6, potential: 8, eliteFloor: 950 },
+    CB: { mult: 3.05, exp: 2.03, cap: 3200, contract: 12, surplusCap: 850, badContract: 850, production: 7, potential: 12, eliteFloor: 1850 },
+    S: { mult: 1.75, exp: 1.94, cap: 1750, contract: 8, surplusCap: 575, badContract: 625, production: 6, potential: 8, eliteFloor: 900 },
+    K: { mult: 0.75, exp: 1.55, cap: 150, contract: 2, surplusCap: 60, badContract: 150, production: 2, potential: 1, eliteFloor: 80 },
+    P: { mult: 0.65, exp: 1.55, cap: 130, contract: 2, surplusCap: 50, badContract: 130, production: 2, potential: 1, eliteFloor: 70 }
+  };
+
+  const TRADE_AWARD_VALUES = {
+    MVP: 800,
+    "SB MVP": 360,
+    DPOY: 520,
+    OPOY: 450,
+    "All-Pro": 280,
+    "Pro Bowl": 85,
+    OROY: 180,
+    DROY: 180
+  };
+
+  const TRADE_ELITE_FLOOR_MAX_AGE = {
+    QB: 32, RB: 27, WR: 29, TE: 30, T: 31, OG: 30, C: 31,
+    DE: 30, DT: 30, LB: 29, CB: 29, S: 30, K: 35, P: 35
+  };
+
+  function tradePositionModel(pos) {
+    return TRADE_POSITION_MODEL[pos] || TRADE_POSITION_MODEL.LB;
   }
 
-  function footballGmNormalizeRating(rating, context) {
-    const defaultMean = 48;
-    const defaultStd = 11;
-    return ((rating - context.mean) / context.std) * defaultStd + defaultMean;
+  function tradeEffectiveRating(player) {
+    const age = player.age || 25;
+    const current = clamp(Number(player.ovr) || 0, 35, 99);
+    const potential = clamp(Math.max(current, Number(player.pot) || current), current, 99);
+    let potentialWeight = 0.02;
+    if (age <= 21) potentialWeight = 0.45;
+    else if (age <= 23) potentialWeight = 0.34;
+    else if (age <= 25) potentialWeight = 0.2;
+    else if (age <= 27) potentialWeight = 0.08;
+    return current * (1 - potentialWeight) + potential * potentialWeight;
   }
 
-  function footballGmCombineOvrPot(current, potential, age) {
-    if (age <= 19) return 0.7 * potential + 0.3 * current;
-    if (age <= 20) return 0.65 * potential + 0.35 * current;
-    if (age <= 21) return 0.6 * potential + 0.4 * current;
-    if (age <= 22) return 0.6 * potential + 0.4 * current;
-    if (age <= 23) return 0.55 * potential + 0.45 * current;
-    if (age <= 24) return 0.45 * potential + 0.55 * current;
-    if (age <= 25) return 0.3 * potential + 0.7 * current;
-    if (age <= 26) return 0.15 * potential + 0.85 * current;
-    if (age <= 27) return 0.025 * potential + 0.95 * current;
-    if (age <= 28) return 0.95 * current;
-    if (age <= 29) return 0.94 * current;
-    if (age <= 30) return 0.93 * current;
-    if (age <= 33) return 0.92 * current;
-    if (age <= 38) return 0.91 * current;
-    return 0.9 * current;
+  function tradeAgeFactor(player) {
+    const pos = player.pos;
+    const age = player.age || 25;
+    const regressionAge = player.regressionAge || REGRESSION_AGES[pos] || 31;
+    const yearsToDecline = regressionAge - age;
+    const earlyUpside = age <= 24 && (player.pot || player.ovr) > player.ovr ? Math.min(0.1, ((player.pot || player.ovr) - player.ovr) * 0.006) : 0;
+    if (yearsToDecline >= 4) return 1.04 + earlyUpside;
+    if (yearsToDecline >= 0) return 0.92 + yearsToDecline * 0.03 + earlyUpside;
+    const declineRate = { QB: 0.09, RB: 0.18, WR: 0.13, TE: 0.13, T: 0.11, OG: 0.12, C: 0.11, DE: 0.13, DT: 0.12, LB: 0.14, CB: 0.14, S: 0.13, K: 0.08, P: 0.08 }[pos] || 0.13;
+    const floor = pos === "QB" ? 0.38 : (pos === "K" || pos === "P" ? 0.5 : 0.24);
+    return clamp(0.92 + yearsToDecline * declineRate, floor, 0.92);
   }
 
-  function footballGmPlayerValue(player, ratingContext = footballGmRatingContext()) {
-    let current = footballGmNormalizeRating(player.ovr, ratingContext);
-    let potential = footballGmNormalizeRating(player.pot, ratingContext);
-    if (player.pos === "QB") {
-      current *= 1.1;
-      potential *= 1.1;
-    } else if (player.pos === "K" || player.pos === "P") {
-      current *= 0.7;
-      potential *= 0.7;
+  function tradeVeteranMarketMultiplier(player) {
+    const age = player.age || 25;
+    const pos = player.pos;
+    if (pos === "QB") {
+      if (age <= 32) return 1;
+      if (age <= 34) return 0.86;
+      if (age <= 36) return 0.66;
+      if (age <= 38) return 0.48;
+      return 0.32;
     }
-    if (current >= potential) potential = current;
-    const combined = footballGmCombineOvrPot(current, potential, player.age || 25);
-    return combined < 0 ? Number.MIN_VALUE : combined;
+    if (pos === "K" || pos === "P") return age <= 36 ? 1 : 0.82;
+    const threshold = { RB: 27, WR: 29, TE: 30, T: 31, OG: 30, C: 31, DE: 30, DT: 30, LB: 29, CB: 29, S: 30 }[pos] || 30;
+    if (age <= threshold) return 1;
+    const rate = { RB: 0.22, WR: 0.16, TE: 0.14, T: 0.15, OG: 0.16, C: 0.15, DE: 0.14, DT: 0.14, LB: 0.16, CB: 0.16, S: 0.15 }[pos] || 0.15;
+    const floor = { RB: 0.18, WR: 0.24, TE: 0.26, T: 0.22, OG: 0.2, C: 0.2, DE: 0.25, DT: 0.25, LB: 0.22, CB: 0.22, S: 0.24 }[pos] || 0.22;
+    return clamp(1 - (age - threshold) * rate, floor, 1);
   }
 
-  function tradeValueContext() {
-    if (tradeValueCache?.leagueId === state.leagueId && tradeValueCache?.year === state.year && tradeValueCache?.playerCount === state.players.length + state.freeAgents.length + (state.retiredPlayers || []).length) {
-      return tradeValueCache;
+  function tradeEliteFloorApplies(player) {
+    const maxAge = TRADE_ELITE_FLOOR_MAX_AGE[player.pos] || 30;
+    const regressionAge = player.regressionAge || REGRESSION_AGES[player.pos] || 31;
+    return (player.age || 25) <= maxAge && (player.age || 25) <= regressionAge;
+  }
+
+  function tradePotentialAdjustment(player, model) {
+    const gap = Math.max(0, (player.pot || player.ovr) - player.ovr);
+    if (!gap) return 0;
+    const age = player.age || 25;
+    const ageWindow = age <= 21 ? 1 : age <= 23 ? 0.82 : age <= 25 ? 0.54 : age <= 27 ? 0.22 : 0.04;
+    return (gap ** 1.35) * model.potential * ageWindow;
+  }
+
+  function tradeAwardValue(player) {
+    return (player.awards || []).reduce((sum, item) => {
+      const award = typeof item === "string" ? item : item.award;
+      const year = typeof item === "string" ? state.year : item.year;
+      const base = TRADE_AWARD_VALUES[award] || (String(award).includes("All-Pro") ? TRADE_AWARD_VALUES["All-Pro"] : 0);
+      if (!base) return sum;
+      const age = clamp(state.year - year, 0, 8);
+      return sum + base * (0.72 ** age);
+    }, 0);
+  }
+
+  function tradeProductionAdjustment(player, model) {
+    return Math.sqrt(tradeProductionValue(player)) * model.production;
+  }
+
+  function tradeInjuryMultiplier(player) {
+    const currentPenalty = player.injury?.weeks > 0 ? Math.min(0.65, player.injury.weeks * 0.035) : 0;
+    const historyPenalty = Math.min(0.34, recentInjuryWeeks(player, 2) * 0.012 + recentMajorInjuries(player, 3) * 0.06);
+    const pronePenalty = clamp((player.injury?.prone || 0.08) * 0.32, 0.01, 0.11);
+    return clamp(1 - currentPenalty - historyPenalty - pronePenalty, 0.32, 1);
+  }
+
+  function tradeContractAdjustment(player, baseValue, model) {
+    if (!player.contract || currentYearIndex(player) < 0) return 0;
+    const yearsLeft = player.contract.years - currentYearIndex(player);
+    if (yearsLeft <= 0) return 0;
+    const market = marketAnnual(player);
+    const actual = avgRemainingSalary(player);
+    const yearlySurplus = market - actual;
+    const yearsFactor = Math.sqrt(clamp(yearsLeft, 1, 5));
+    const raw = yearlySurplus * model.contract * yearsFactor;
+    if (raw >= 0) {
+      return clamp(raw, 0, Math.min(model.surplusCap, baseValue * (player.pos === "QB" ? 0.55 : 0.42)));
     }
-    const ratingContext = footballGmRatingContext();
-    const values = allKnownPlayers().filter(player => !playerIsRetired(player)).map(player => footballGmPlayerValue(player, ratingContext));
-    const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 48;
-    const variance = values.length ? values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / values.length : 100;
-    tradeValueCache = { leagueId: state.leagueId, year: state.year, playerCount: state.players.length + state.freeAgents.length + (state.retiredPlayers || []).length, ratingContext, mean, std: Math.max(1, Math.sqrt(variance)) };
-    return tradeValueCache;
-  }
-
-  function footballGmNormalizedPlayerValue(player) {
-    const context = tradeValueContext();
-    return (footballGmPlayerValue(player, context.ratingContext) - context.mean) / context.std;
+    return -clamp(Math.abs(raw), 0, Math.min(model.badContract, baseValue * 0.85 + 250));
   }
 
   function teamTradeStrategy(teamId) {
@@ -3898,83 +3969,86 @@
     return "neutral";
   }
 
-  function strategyAdjustedAssetValue(value, asset, strategy) {
-    let adjusted = value;
+  function tradeStrategyMultiplier(player, evaluatingTeamId) {
+    const strategy = teamTradeStrategy(evaluatingTeamId);
     if (strategy === "rebuilding") {
-      if (asset.type === "pick" && asset.future) adjusted *= 1.1;
-      else if (asset.age <= 19) adjusted *= 1.075;
-      else if (asset.age === 20) adjusted *= 1.05;
-      else if (asset.age === 21) adjusted *= 1.0375;
-      else if (asset.age === 22) adjusted *= 1.025;
-      else if (asset.age === 23) adjusted *= 1.0125;
-      else if (asset.age === 27) adjusted *= 0.975;
-      else if (asset.age === 28) adjusted *= 0.95;
-      else if (asset.age >= 29) adjusted *= 0.9;
+      if (player.age <= 23) return 1.08;
+      if (player.age <= 25) return 1.04;
+      if (player.age >= 30) return player.pos === "QB" ? 0.9 : 0.82;
+      if (player.age >= 28) return 0.93;
     } else if (strategy === "contending") {
-      if (asset.type === "pick" && asset.future) adjusted *= 0.825;
-      else if (asset.age <= 19) adjusted *= 0.8;
-      else if (asset.age === 20) adjusted *= 0.825;
-      else if (asset.age === 21) adjusted *= 0.85;
-      else if (asset.age === 22) adjusted *= 0.875;
-      else if (asset.age === 23) adjusted *= 0.925;
-      else if (asset.age === 24) adjusted *= 0.95;
+      if (player.age <= 21) return 0.88;
+      if (player.age <= 23) return 0.93;
+      if (player.ovr >= 82 && player.age <= 31) return 1.05;
     }
-    return adjusted;
+    return 1;
   }
 
-  function footballGmContractValue(player, normalizedValue, strategy) {
-    if (!player.contract || currentYearIndex(player) < 0) return 0;
-    const yearsLeft = player.contract.years - currentYearIndex(player);
-    if (yearsLeft <= 1) return 0;
-    const minValue = -1;
-    const maxValue = 3;
-    const cap = salaryCap();
-    const maxContract = 60;
-    const minContract = 0.82;
-    const normalizedContractAmount = avgRemainingSalary(player) / cap;
-    const slope = (maxContract / cap - minContract / cap) / (maxValue - minValue);
-    const expectedAmount = slope * (normalizedValue - minValue);
-    const contractValue = Math.min(expectedAmount - normalizedContractAmount, 0.1);
-    return (strategy === "rebuilding" ? 2 : 0.5) * contractValue;
+  function tradeTeamNeedMultiplier(player, evaluatingTeamId) {
+    const team = getTeam(evaluatingTeamId);
+    if (!team || player.pos === "K" || player.pos === "P") return 1;
+    const profile = positionGroupProfile(evaluatingTeamId, player.pos);
+    const need = draftPositionNeed(evaluatingTeamId, player.pos);
+    let multiplier = 1 + clamp((need - 12) / 95, -0.1, 0.18);
+    if (player.teamId === evaluatingTeamId && player.ovr >= profile.starterAvg - 1) multiplier += 0.05;
+    if (player.teamId !== evaluatingTeamId && profile.shortage > 0) multiplier += 0.04;
+    return clamp(multiplier, 0.86, 1.24);
   }
 
-  function footballGmPlayerAssetValue(player, evaluatingTeamId, includeInjuries = true) {
-    if (playerIsRetired(player)) return 0;
-    const strategy = teamTradeStrategy(evaluatingTeamId || player.teamId || USER_TEAM_ID);
-    let value = footballGmNormalizedPlayerValue(player);
-    value = strategyAdjustedAssetValue(value, { type: "player", age: player.age }, strategy);
-    if (includeInjuries && evaluatingTeamId !== USER_TEAM_ID && player.injury.weeks > 0 && value > 0) value -= value * (player.injury.weeks > 18 ? 0.75 : player.injury.weeks / 25);
-    if (value < 0) value /= 20;
-    value += footballGmContractValue(player, value, strategy);
-    if (player.yearsPro === 0 && player.draftYear === state.year) value = Math.max(0, value);
-    return value;
-  }
-
-  function normalizedPickValue(pickAsset, evaluatingTeamId) {
-    const chartValue = pickValue(pickAsset);
-    const normalized = Math.cbrt(Math.max(0.1, chartValue) / 111);
+  function tradePickValue(pickAsset, evaluatingTeamId) {
+    let value = pickValue(pickAsset);
     const strategy = teamTradeStrategy(evaluatingTeamId || USER_TEAM_ID);
     const future = pickAsset.year > state.year + 1 || (pickAsset.year === state.year + 1 && state.phase !== "draft");
-    return strategyAdjustedAssetValue(normalized, { type: "pick", age: 20, future }, strategy);
+    if (strategy === "rebuilding") {
+      value *= future ? 1.1 : 1.04;
+    } else if (strategy === "contending") {
+      value *= future ? 0.86 : 0.93;
+    }
+    return round(value, 1);
   }
 
-  function footballGmSumValue(value) {
-    return value > 1 ? value ** 3 : value;
+  function playerTradeChartValue(player, evaluatingTeamId = null, includeInjuries = true) {
+    if (playerIsRetired(player)) return 0;
+    const model = tradePositionModel(player.pos);
+    const replacement = TRADE_REPLACEMENT_LEVEL[player.pos] || 71;
+    const rating = tradeEffectiveRating(player);
+    const score = Math.max(0, rating - replacement);
+    let base = (score ** model.exp) * model.mult;
+    base *= tradeAgeFactor(player);
+    const contract = tradeContractAdjustment(player, base, model);
+    let value = base + tradePotentialAdjustment(player, model) + tradeAwardValue(player) + tradeProductionAdjustment(player, model) + contract;
+    if (value > 0) value *= tradeVeteranMarketMultiplier(player);
+    if (includeInjuries) value *= tradeInjuryMultiplier(player);
+    if (evaluatingTeamId) value *= tradeStrategyMultiplier(player, evaluatingTeamId) * tradeTeamNeedMultiplier(player, evaluatingTeamId);
+    if (player.yearsPro === 0 && player.draftYear === state.year) value = Math.max(0, value);
+    if (player.pos === "QB" && player.ovr >= 95 && tradeEliteFloorApplies(player) && includeInjuries && tradeInjuryMultiplier(player) >= 0.68) {
+      value = Math.max(value, model.eliteFloor + (player.ovr - 95) * 425 + Math.max(0, (player.pot || player.ovr) - player.ovr) * 110);
+    } else if (model.eliteFloor && player.ovr >= 95 && tradeEliteFloorApplies(player)) {
+      value = Math.max(value, model.eliteFloor);
+    }
+    const minValue = player.contract && contract < -base * 0.6 ? -model.badContract : 0;
+    return round(clamp(value, minValue, model.cap), 1);
   }
 
-  function tradeSumToChartValue(value) {
-    return round(value * 111, 1);
-  }
-
-  function playerTradeValue(player) {
-    return tradeSumToChartValue(footballGmSumValue(footballGmPlayerAssetValue(player, player.teamId || USER_TEAM_ID, true)));
+  function playerTradeValue(player, evaluatingTeamId = null) {
+    return playerTradeChartValue(player, evaluatingTeamId, true);
   }
 
   function marketAnnual(player) {
     return projectedAnnual(player);
   }
 
-  function tradePackageRawValue(assetIds, evaluatingTeamId) {
+  function tradePackagePlayerMultiplier(value, index) {
+    if (index === 0) return 1;
+    if (value >= 1800) return index === 1 ? 0.92 : 0.82;
+    if (value >= 850) return [1, 0.9, 0.78, 0.64, 0.52][index] || 0.45;
+    if (value >= 350) return [1, 0.82, 0.62, 0.45, 0.32][index] || 0.24;
+    if (value >= 150) return [1, 0.62, 0.42, 0.28, 0.18][index] || 0.12;
+    return index === 1 ? 0.34 : index === 2 ? 0.2 : 0.08;
+  }
+
+  function tradePackageValue(assetIds, evaluatingTeamId) {
+    const playerValues = [];
     let total = 0;
     for (const assetId of assetIds) {
       const asset = parseAsset(assetId);
@@ -3982,17 +4056,19 @@
       if (asset.type === "player") {
         const player = getPlayer(asset.playerId);
         if (!player) continue;
-        total += footballGmSumValue(footballGmPlayerAssetValue(player, evaluatingTeamId, true));
+        const value = playerTradeChartValue(player, evaluatingTeamId, true);
+        if (value >= 0) playerValues.push(value);
+        else total += value;
       } else {
         const pickAsset = findPickAsset(asset);
-        if (pickAsset) total += footballGmSumValue(normalizedPickValue(pickAsset, evaluatingTeamId));
+        if (pickAsset) total += tradePickValue(pickAsset, evaluatingTeamId);
       }
     }
-    return total;
-  }
-
-  function tradePackageValue(assetIds, evaluatingTeamId) {
-    return tradeSumToChartValue(tradePackageRawValue(assetIds, evaluatingTeamId));
+    playerValues.sort((a, b) => b - a);
+    playerValues.forEach((value, index) => {
+      total += value * tradePackagePlayerMultiplier(value, index);
+    });
+    return round(total, 1);
   }
 
   function parseAsset(assetId) {
@@ -4047,14 +4123,12 @@
     const mine = Array.from(ui.tradeMine);
     const theirs = Array.from(ui.tradeTheirs);
     const partner = getTeam(ui.tradePartner);
-    const mineRawValue = tradePackageRawValue(mine, partner.id);
-    const theirsRawValue = tradePackageRawValue(theirs, partner.id);
-    const mineValue = tradeSumToChartValue(mineRawValue);
-    const theirsValue = tradeSumToChartValue(theirsRawValue);
+    const mineValue = tradePackageValue(mine, partner.id);
+    const theirsValue = tradePackageValue(theirs, partner.id);
     const aiNeedPremium = 1.03 + (partner.wins >= 8 ? 0.04 : 0) + (state.phase === "draft" ? -0.02 : 0);
     const cap = previewTradeCap(USER_TEAM_ID, partner.id, mine, theirs);
     const roster = previewTradeRoster(USER_TEAM_ID, partner.id, mine, theirs);
-    const accepted = mineRawValue >= theirsRawValue * aiNeedPremium && cap.userAfter >= -1 && cap.partnerAfter >= -8 && roster.userAfter <= MAX_ROSTER + 3 && roster.partnerAfter <= MAX_ROSTER + 3;
+    const accepted = mineValue >= theirsValue * aiNeedPremium && cap.userAfter >= -1 && cap.partnerAfter >= -8 && roster.userAfter <= MAX_ROSTER + 3 && roster.partnerAfter <= MAX_ROSTER + 3;
     return { mineValue, theirsValue, delta: round(mineValue - theirsValue * aiNeedPremium, 1), accepted, cap, roster };
   }
 
@@ -4252,7 +4326,6 @@
   }
 
   function render() {
-    tradeValueCache = null;
     if (!state || ui.screen === "hub") {
       renderLeagueHub();
       return;
