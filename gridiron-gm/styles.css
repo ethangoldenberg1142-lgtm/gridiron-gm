@@ -197,14 +197,19 @@ textarea {
 }
 
 .nav-tabs {
+  position: relative;
+  z-index: 5;
   display: flex;
   gap: 2px;
   padding: 0 14px;
   overflow-x: auto;
   background: var(--nav-2);
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .nav-tabs button {
+  flex: 0 0 auto;
   background: transparent;
   color: #dbe4ef;
   border: 0;
@@ -212,6 +217,7 @@ textarea {
   min-height: 42px;
   padding: 0 12px;
   white-space: nowrap;
+  touch-action: manipulation;
 }
 
 .nav-tabs button.active {
