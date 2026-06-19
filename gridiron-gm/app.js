@@ -1109,6 +1109,10 @@
     return window.NFL_MODE_DATA || null;
   }
 
+  function nflResumeData() {
+    return window.NFL_RESUME_DATA || null;
+  }
+
   function mapNflTeam(teamLabel) {
     return NFL_TEAM_LABEL_TO_ID[teamLabel] || null;
   }
@@ -1129,6 +1133,36 @@
       .replace(/\bkenneth\b/g, "kenny")
       .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "")
       .replace(/[^a-z]/g, "");
+  }
+
+  function nflResumeKeyForSource(source) {
+    return normalizeNflContractName(`${source.firstName || ""} ${source.lastName || ""}`);
+  }
+
+  function nflResumeForSource(source) {
+    const key = nflResumeKeyForSource(source);
+    const data = nflResumeData();
+    return {
+      key,
+      stats: data?.stats?.[key] || null,
+      awards: data?.awards?.[key] || []
+    };
+  }
+
+  function cloneStatsRow(row) {
+    const target = blankStats();
+    for (const key of Object.keys(target)) target[key] = Number(row?.[key]) || 0;
+    if (row?.year) target.year = row.year;
+    return target;
+  }
+
+  function nflStatsForResume(resumeStats) {
+    if (!resumeStats) return { season: blankStats(), career: blankStats(), history: [] };
+    return {
+      season: blankStats(),
+      career: cloneStatsRow(resumeStats.career),
+      history: (resumeStats.history || []).map(cloneStatsRow)
+    };
   }
 
   function addUniqueContractLookup(map, key, contract) {
@@ -1305,6 +1339,7 @@
     };
     const body = source.height && source.weight ? { height: source.height, weight: source.weight } : makeBody(pos);
     const realContract = realNflContractForSource(source, pos);
+    const resume = nflResumeForSource(source);
     return {
       id: id("p", "nextPlayerId"),
       firstName: source.firstName || "Unknown",
@@ -1327,8 +1362,8 @@
       injury: { status: "Healthy", weeks: 0, history: [], prone: nflInjuryProne(pos, ratings.inj) },
       contract: teamId ? (cloneContract(realContract) || makeContract(pos, ovr, pot, source.age || 25)) : null,
       realContract: realContract ? cloneContract(realContract) : null,
-      stats: { season: blankStats(), career: blankStats(), history: [] },
-      awards: [],
+      stats: nflStatsForResume(resume.stats),
+      awards: resume.awards.map(item => ({ year: item.year, award: item.award })),
       morale: randInt(48, 86),
       hidden,
       madden: {
@@ -1337,7 +1372,10 @@
         originalPosition: source.pos,
         archetype: source.archetype || "",
         abilities: (source.abilities || []).map(ability => ability.label).filter(Boolean),
-        stats: source.stats || {}
+        stats: source.stats || {},
+        resumeKey: resume.key,
+        resumeSource: resume.stats ? "nflverse 2021-2024 regular-season stats" : "",
+        awardsSource: resume.awards.length ? "curated major NFL awards" : ""
       }
     };
   }
@@ -3817,9 +3855,10 @@
   }
 
   function tradeProductionValue(player) {
-    const current = tradeProductionScore(player, player.stats.season);
-    const history = (player.stats.history || []).slice(-3).reverse().reduce((sum, row, index) => sum + tradeProductionScore(player, row) * (0.55 ** (index + 1)), 0);
-    return clamp((current + history) * 1.4, 0, 520);
+    const current = tradeProductionScore(player, player.stats.season) * 1.05;
+    const historyWeights = [0.78, 0.48, 0.28, 0.16];
+    const history = (player.stats.history || []).slice(-4).reverse().reduce((sum, row, index) => sum + tradeProductionScore(player, row) * (historyWeights[index] || 0.08), 0);
+    return clamp((current + history) * 1.65, 0, 900);
   }
 
   const TRADE_REPLACEMENT_LEVEL = {
@@ -3829,13 +3868,13 @@
 
   const TRADE_POSITION_MODEL = {
     QB: { mult: 6.35, exp: 2.13, cap: 7200, contract: 18, surplusCap: 1650, badContract: 2300, production: 11, potential: 31, eliteFloor: 3300 },
-    RB: { mult: 2.0, exp: 1.8, cap: 1450, contract: 8, surplusCap: 500, badContract: 650, production: 8, potential: 8, eliteFloor: 650 },
-    WR: { mult: 2.75, exp: 2.03, cap: 2700, contract: 13, surplusCap: 850, badContract: 900, production: 8, potential: 13, eliteFloor: 1550 },
+    RB: { mult: 2.55, exp: 1.88, cap: 2050, contract: 10, surplusCap: 700, badContract: 800, production: 12, potential: 15, eliteFloor: 1050 },
+    WR: { mult: 3.15, exp: 2.07, cap: 3500, contract: 14, surplusCap: 1000, badContract: 1000, production: 11, potential: 18, eliteFloor: 2050 },
     TE: { mult: 1.65, exp: 1.96, cap: 1650, contract: 9, surplusCap: 600, badContract: 650, production: 6, potential: 10, eliteFloor: 900 },
-    T: { mult: 2.95, exp: 2.0, cap: 3100, contract: 12, surplusCap: 850, badContract: 850, production: 3, potential: 11, eliteFloor: 1800 },
+    T: { mult: 3.55, exp: 2.04, cap: 3700, contract: 13, surplusCap: 1000, badContract: 950, production: 4, potential: 16, eliteFloor: 2500 },
     OG: { mult: 1.55, exp: 1.88, cap: 1550, contract: 8, surplusCap: 550, badContract: 600, production: 2, potential: 7, eliteFloor: 850 },
     C: { mult: 1.5, exp: 1.88, cap: 1500, contract: 8, surplusCap: 525, badContract: 575, production: 2, potential: 7, eliteFloor: 800 },
-    DE: { mult: 3.25, exp: 2.05, cap: 3400, contract: 13, surplusCap: 900, badContract: 950, production: 8, potential: 12, eliteFloor: 1900 },
+    DE: { mult: 4.35, exp: 2.08, cap: 4700, contract: 14, surplusCap: 1050, badContract: 1100, production: 11, potential: 17, eliteFloor: 3100 },
     DT: { mult: 2.25, exp: 2.02, cap: 2550, contract: 11, surplusCap: 750, badContract: 800, production: 7, potential: 10, eliteFloor: 1350 },
     LB: { mult: 1.85, exp: 1.96, cap: 1800, contract: 8, surplusCap: 575, badContract: 625, production: 6, potential: 8, eliteFloor: 950 },
     CB: { mult: 3.05, exp: 2.03, cap: 3200, contract: 12, surplusCap: 850, badContract: 850, production: 7, potential: 12, eliteFloor: 1850 },
@@ -3845,14 +3884,14 @@
   };
 
   const TRADE_AWARD_VALUES = {
-    MVP: 800,
-    "SB MVP": 360,
-    DPOY: 520,
-    OPOY: 450,
-    "All-Pro": 280,
+    MVP: 900,
+    "SB MVP": 400,
+    DPOY: 700,
+    OPOY: 575,
+    "All-Pro": 360,
     "Pro Bowl": 85,
-    OROY: 180,
-    DROY: 180
+    OROY: 220,
+    DROY: 220
   };
 
   const TRADE_ELITE_FLOOR_MAX_AGE = {

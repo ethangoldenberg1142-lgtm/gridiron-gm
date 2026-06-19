@@ -1,9 +1,11 @@
-const CACHE_NAME = "gridiron-gm-v12";
+const CACHE_NAME = "gridiron-gm-v13";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./nfl-data.js",
+  "./nfl-resume-data.js",
   "./manifest.webmanifest",
   "./icon.svg"
 ];
