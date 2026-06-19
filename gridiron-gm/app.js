@@ -13,6 +13,7 @@
   const NFL_2025_CAP = 279.2;
   const BASE_CAP = 301.2;
   const USER_TEAM_ID = "DET";
+  const APP_VERSION = "2026.06.19.1";
   const STANDARD_LEAGUE_SEED = "gridiron-standard-2026-v4";
   const NFL_LEAGUE_SEED = "gridiron-nfl-2025-v1";
 
@@ -4415,6 +4416,7 @@
         <header class="hub-header">
           <h1>${ui.discreteMode ? "Operations Workbook" : "Detroit Wolverines GM"}</h1>
           <div>${ui.discreteMode ? "Choose a workbook, import data, or start a clean file." : "Choose a league, import a save, or generate a new clean league."}</div>
+          <div class="muted">Version ${APP_VERSION}</div>
         </header>
         <main class="hub-main">
           ${ui.toast ? `<div class="toast">${escapeHtml(ui.toast)}</div>` : ""}
