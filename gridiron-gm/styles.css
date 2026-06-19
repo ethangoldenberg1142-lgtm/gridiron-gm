@@ -26,7 +26,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 html,
@@ -94,18 +94,17 @@ textarea {
 }
 
 .shell {
-  width: 100vw;
-  max-width: 100vw;
-  overflow-x: hidden;
+  width: max(1100px, 100vw);
+  min-width: 1100px;
+  overflow-x: visible;
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr;
 }
 
 .topbar {
-  width: 100vw;
-  max-width: 100vw;
-  overflow-x: hidden;
+  width: 100%;
+  overflow-x: visible;
   background: var(--nav);
   color: #fff;
   border-bottom: 4px solid #b91c1c;
@@ -218,16 +217,18 @@ textarea {
 .nav-tabs {
   position: relative;
   z-index: 5;
-  width: 100vw;
-  max-width: 100vw;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   display: flex;
   gap: 2px;
   padding: 0 14px;
   overflow-x: auto;
+  overflow-y: hidden;
   background: var(--nav-2);
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 
 .nav-tabs button {
@@ -239,7 +240,7 @@ textarea {
   min-height: 42px;
   padding: 0 12px;
   white-space: nowrap;
-  touch-action: manipulation;
+  touch-action: pan-x;
 }
 
 .nav-tabs button.active {
@@ -249,8 +250,8 @@ textarea {
 }
 
 .main {
-  width: min(1500px, 100vw);
-  max-width: 100vw;
+  width: min(1500px, 100%);
+  max-width: none;
   min-width: 0;
   margin: 0 auto;
   padding: 18px;
@@ -812,9 +813,9 @@ button.mini-button {
 }
 
 .league-hub {
-  width: 100vw;
-  max-width: 100vw;
-  overflow-x: hidden;
+  width: max(1100px, 100vw);
+  min-width: 1100px;
+  overflow-x: visible;
   min-height: 100vh;
   background: var(--bg);
   display: grid;
@@ -950,8 +951,8 @@ button.mini-button {
 }
 
 .hub-main {
-  width: min(1100px, 100vw);
-  max-width: 100vw;
+  width: min(1100px, 100%);
+  max-width: none;
   min-width: 0;
   margin: 0 auto;
   padding: 18px;
@@ -981,13 +982,31 @@ button.mini-button {
 }
 
 .mobile-mode {
+  width: 100vw;
+  max-width: 100vw;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.shell.mobile-mode,
+.league-hub.mobile-mode {
+  width: 100vw;
+  max-width: 100vw;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.mobile-mode .topbar {
+  width: 100vw;
+  max-width: 100vw;
   overflow-x: hidden;
 }
 
 .mobile-mode .main,
 .mobile-mode .hub-main {
-  width: 100%;
-  max-width: none;
+  width: 100vw;
+  max-width: 100vw;
+  min-width: 0;
   padding: 10px;
 }
 
@@ -1032,13 +1051,19 @@ button.mini-button {
 }
 
 .mobile-mode .nav-tabs {
+  width: 100vw;
+  max-width: 100vw;
   padding: 0 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x;
 }
 
 .mobile-mode .nav-tabs button {
   min-height: 38px;
   padding: 0 9px;
   font-size: 12px;
+  touch-action: pan-x;
 }
 
 .mobile-mode .grid.two,
@@ -1115,122 +1140,123 @@ button.mini-button {
 }
 
 @media (max-width: 980px) {
-  .brand-row {
+  .mobile-mode .brand-row {
     align-items: flex-start;
   }
 
-  .status-strip {
+  .mobile-mode .status-strip {
     width: 100%;
     justify-content: flex-start;
     margin-left: 0;
   }
 
-  .brand-row {
+  .mobile-mode .brand-row {
     flex-wrap: wrap;
   }
 
-  .grid.two,
-  .grid.three,
-  .asset-grid {
+  .mobile-mode .grid.two,
+  .mobile-mode .grid.three,
+  .mobile-mode .asset-grid {
     grid-template-columns: 1fr;
   }
 
-  .metric-row {
+  .mobile-mode .metric-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 560px) {
-  .shell,
-  .league-hub,
-  .topbar,
-  .main,
-  .hub-main,
-  .nav-tabs {
+  .shell.mobile-mode,
+  .league-hub.mobile-mode,
+  .mobile-mode .topbar,
+  .mobile-mode .main,
+  .mobile-mode .hub-main,
+  .mobile-mode .nav-tabs {
     width: 100vw;
     max-width: 100vw;
     overflow-x: hidden;
   }
 
-  .main {
+  .mobile-mode .main {
     padding: 8px;
   }
 
-  .hub-main {
+  .mobile-mode .hub-main {
     padding: 8px;
   }
 
-  .brand-row {
+  .mobile-mode .brand-row {
     padding: 8px;
     gap: 8px;
   }
 
-  .badge {
+  .mobile-mode .badge {
     width: 34px;
     height: 34px;
     font-size: 12px;
   }
 
-  .brand-title h1 {
+  .mobile-mode .brand-title h1 {
     font-size: 15px;
   }
 
-  .brand-title div {
+  .mobile-mode .brand-title div {
     font-size: 11px;
   }
 
-  .status-strip {
+  .mobile-mode .status-strip {
     gap: 5px;
   }
 
-  .pill,
-  .mode-toggle {
+  .mobile-mode .pill,
+  .mobile-mode .mode-toggle {
     font-size: 11px;
   }
 
-  .nav-tabs {
+  .mobile-mode .nav-tabs {
     padding: 0 4px;
+    overflow-x: auto;
   }
 
-  .nav-tabs button {
+  .mobile-mode .nav-tabs button {
     min-height: 36px;
     padding: 0 7px;
     font-size: 11px;
   }
 
-  .metric-row {
+  .mobile-mode .metric-row {
     grid-template-columns: 1fr;
   }
 
-  .field-content {
+  .mobile-mode .field-content {
     grid-template-columns: 1fr;
     text-align: center;
   }
 
-  .toolbar h2 {
+  .mobile-mode .toolbar h2 {
     width: 100%;
   }
 
-  .panel-header,
-  .split {
+  .mobile-mode .panel-header,
+  .mobile-mode .split {
     flex-wrap: wrap;
   }
 
-  .panel-body {
+  .mobile-mode .panel-body {
     padding: 8px;
   }
 
-  .metric {
+  .mobile-mode .metric {
     min-height: 60px;
     padding: 8px;
   }
 
-  .table-wrap,
-  .asset-table-wrap {
+  .mobile-mode .table-wrap,
+  .mobile-mode .asset-table-wrap {
     max-width: 100%;
   }
 
-  .league-row {
+  .mobile-mode .league-row {
     grid-template-columns: 1fr;
     align-items: stretch;
   }
